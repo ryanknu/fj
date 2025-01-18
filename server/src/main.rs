@@ -1,0 +1,68 @@
+use heed::types::{Str, U32};
+use heed::{Database, EnvOpenOptions};
+use oxhttp::model::{Response, Status};
+use oxhttp::Server;
+use std::net::Ipv4Addr;
+use std::time::Duration;
+
+mod config;
+mod handlers;
+mod model;
+mod state;
+
+/// Notes:
+/// - [ ] Front end in elm
+///   - Macro bars across the top (fat, protein, carb, calories), they can be really small, like 8px font
+///   - Add a food by name
+///   - Add a food by barcode (camera/scanner).. may not care
+///   - End day
+///   - Journal needs a day marker... if something is eaten at 01:00, it still counts towards the prev day
+/// - [ ] Back end probably in axum
+/// - [ ] Manually enter macros
+/// - [ ] Button to end prev day and new day
+/// - [ ] Query OpenFoodFacts in real time
+/// - [ ] Utility to download OpenFoodFacts database
+///   - [ ] Requires a Meilisearch instance
+/// - [ ] Automatic entries (e.g. monster daily, or skip breakfast?)
+/// - [ ] Dockerfile based on linuxserver (see: https://github.com/linuxserver/docker-emby/blob/master/Dockerfile)
+/// - [ ] Github docker release XML/JSON compatible with Unraid
+/// - [ ] Multiple users, identified by name is fine
+/// - [ ] Use LMDB (heed/heed3) for primary storage in a /data dir
+///
+///
+///
+/// API:
+/// - GET /v1/<user>/journal - retrieves the journal for the user for the last 31 days
+/// - GET /v1/food?term= - searches for food by term or barcode
+/// - GET /v1/macro-targets - retrieves ideal macro goals based on criteria such as height, weight, etc. (OPTIONAL)
+/// - POST /v1/load-off - If meilisearch is configured, this will start a download and index of the OpenFoodFacts database
+/// - GET /v1/load-off - Retrieves the status of any current OpenFoodFacts database download.
+/// - POST /v1/<user>/journal - Upserts an entry in the journal. Date and ID must be specified. Daily totals are updated.
+
+fn main() {
+    println!("Hello, world!");
+
+    // Open db
+    let dir = std::env::current_dir().unwrap();
+    let env = unsafe { EnvOpenOptions::new().open(dir).unwrap() };
+
+    // TODO: Maybe open dbs for each user
+
+    // Creates a default database, but...
+    // let mut wtxn = env.write_txn().unwrap();
+    // let db: Database<Str, Str> = env.clone().create_database(&mut wtxn, None).unwrap();
+
+    let mut server = Server::new(move |request| match request.url().path() {
+        "/" => Response::builder(Status::OK).with_body("home"),
+        "/journal" => handlers::journal::journal(&request, &env),
+        _ => Response::builder(Status::NOT_FOUND).build(),
+    });
+    // We bind the server to localhost on both IPv4 and v6
+    server = server
+        .bind((Ipv4Addr::LOCALHOST, 8080))
+        .with_global_timeout(Duration::from_secs(10))
+        .with_max_concurrent_connections(128);
+
+    // We spawn the server and block on it
+    server.spawn().unwrap().join().unwrap();
+}

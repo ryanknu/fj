@@ -1,0 +1,9 @@
+[package]
+name = "food-journal"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+heed = "0.21.0"
+oxhttp = "0.2.7"
+byteorder = "1.5.0"
