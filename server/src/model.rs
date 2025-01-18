@@ -1,0 +1,17 @@
+struct FoodEntry {
+    id: String,
+    off_id: String,
+    name: String,
+    ledger_date: String,
+    timestamp: String,
+    calories: u16,
+    total_fat: u16,
+    saturated_fat: u16,
+    monounsaturated_fat: u16,
+    total_carbohydrates: u16,
+    sugars: u16,
+    added_sugars: u16,
+    fiber: u16,
+    protein: u16,
+    salt: u16,
+}
