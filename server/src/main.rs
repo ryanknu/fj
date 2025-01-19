@@ -49,12 +49,13 @@ fn main() {
     // TODO: Maybe open dbs for each user
 
     // Creates a default database, but...
-    // let mut wtxn = env.write_txn().unwrap();
-    // let db: Database<Str, Str> = env.clone().create_database(&mut wtxn, None).unwrap();
+    let mut wtxn = env.write_txn().unwrap();
+    let db: Database<Str, Str> = env.clone().create_database(&mut wtxn, None).unwrap();
+    wtxn.commit().unwrap();
 
     let mut server = Server::new(move |request| match request.url().path() {
         "/" => Response::builder(Status::OK).with_body("home"),
-        "/journal" => handlers::journal::journal(&request, &env),
+        "/journal" => handlers::journal::journal(request, &env, &db),
         _ => Response::builder(Status::NOT_FOUND).build(),
     });
     // We bind the server to localhost on both IPv4 and v6
