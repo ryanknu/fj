@@ -6,6 +6,7 @@ use std::net::Ipv4Addr;
 use std::time::Duration;
 
 mod config;
+mod error;
 mod handlers;
 mod model;
 mod state;
@@ -53,17 +54,19 @@ fn main() {
     let db: Database<Str, Str> = env.clone().create_database(&mut wtxn, None).unwrap();
     wtxn.commit().unwrap();
 
+    // TODO: We should definitely check content-length of request payloads and discard large ones.
     let mut server = Server::new(move |request| match request.url().path() {
         "/" => Response::builder(Status::OK).with_body("home"),
+        "/v1/users" => handlers::users::http_get_users(&env, &db),
+        "/v1/register" => handlers::users::http_post_register(request, &env, &db),
         "/journal" => handlers::journal::journal(request, &env, &db),
         _ => Response::builder(Status::NOT_FOUND).build(),
     });
-    // We bind the server to localhost on both IPv4 and v6
+
     server = server
         .bind((Ipv4Addr::LOCALHOST, 8080))
         .with_global_timeout(Duration::from_secs(10))
         .with_max_concurrent_connections(128);
 
-    // We spawn the server and block on it
     server.spawn().unwrap().join().unwrap();
 }
