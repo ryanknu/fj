@@ -10,10 +10,7 @@ pub struct UserRequest {
     image: String,
     user_name: String,
     display_name: String,
-    height: u64,
-    weight: u64,
     target_calories: u64,
-    goal: String,
 }
 
 #[derive(Deserialize, Serialize)]

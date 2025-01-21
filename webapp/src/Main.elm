@@ -3,18 +3,24 @@ module Main exposing (Model, Msg(..), init, main, update, view)
 import Array exposing (Array)
 import Browser
 import Dict exposing (Dict)
-import File.Select as FileSelect
-import Html exposing (Html, button, div, fieldset, h1, h2, input, label, legend, main_, node, text)
-import Html.Attributes exposing (class, placeholder, type_, value)
+import File exposing (File)
+import File.Select as Select
+import Html exposing (Html, button, div, fieldset, h1, h2, img, input, label, legend, main_, node, text)
+import Html.Attributes exposing (class, disabled, placeholder, src, type_, value)
 import Html.Events exposing (onClick, onInput)
 import Http
 import Json.Decode as JsonDecode exposing (Decoder, field, string)
 import Json.Encode as JsonEncode exposing (dict)
 import List exposing (isEmpty, map)
+import ParseInt exposing (parseInt)
+import Regex
+import String exposing (length)
+import Task
 
 
 
 -- MAIN
+-- TODO: Import Url.Builder and use relative urls
 
 
 main : Program () Model Msg
@@ -32,6 +38,7 @@ type alias Model =
     , inputs : AllInputs
     , allUsers : List User
     , registering : Bool
+    , error : Maybe String
     , workRemaining : Int
     , debug : String
     }
@@ -41,6 +48,7 @@ type alias AllInputs =
     { rgUserName : String
     , rgDisplayName : String
     , rgTargetCalories : String
+    , rgImage : String
     }
 
 
@@ -76,6 +84,7 @@ defaultInputs =
     { rgUserName = ""
     , rgDisplayName = ""
     , rgTargetCalories = "1800"
+    , rgImage = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAMAAAAoyzS7AAAAA1BMVEX09PYxuZVGAAAADUlEQVR42gECAP3/AAAAAgABUyucMAAAAABJRU5ErkJggg=="
     }
 
 
@@ -86,6 +95,7 @@ defaultModel =
     , inputs = defaultInputs
     , allUsers = []
     , registering = False
+    , error = Nothing
     , workRemaining = 0
     , debug = ""
     }
@@ -104,6 +114,21 @@ setRgDisplayName value e =
 setRgTargetCalories : String -> AllInputs -> AllInputs
 setRgTargetCalories value e =
     { e | rgTargetCalories = value }
+
+
+setRgImage : String -> AllInputs -> AllInputs
+setRgImage value e =
+    { e | rgImage = value }
+
+
+rgIsValid : AllInputs -> Bool
+rgIsValid inputs =
+    (length inputs.rgUserName > 0)
+        && (length inputs.rgDisplayName > 0)
+        && (inputs.rgImage /= defaultInputs.rgImage)
+        && Regex.contains (Maybe.withDefault Regex.never <| Regex.fromString "^[a-z]+$") inputs.rgUserName
+        && Regex.contains (Maybe.withDefault Regex.never <| Regex.fromString "^[0-9]+$") inputs.rgTargetCalories
+        && (Result.withDefault 0 (parseInt inputs.rgTargetCalories) > 1200)
 
 
 
@@ -139,6 +164,10 @@ type Msg
     | TxtStateRgUserName String
     | TxtStateRgDisplayName String
     | TxtStateRgTargetCalories String
+      -- Registration image handler
+    | RgImageRequested
+    | RgImageSelected File
+    | RgImageLoaded String
       -- Register user: expectWhatever with () for success for 201 CREATED
     | GotoRegistration
     | UserRegistered (Result Http.Error ())
@@ -154,6 +183,20 @@ update msg model =
 
                 Err n ->
                     ( { model | workRemaining = 0, commState = Error ("loading config. " ++ errorToString n) }, Cmd.none )
+
+        RgImageRequested ->
+            ( model, Select.file [ "image/png", "image/jpeg" ] RgImageSelected )
+
+        RgImageSelected file ->
+            ( model, Task.perform RgImageLoaded (File.toUrl file) )
+
+        RgImageLoaded content ->
+            case length content > 10240 of
+                True ->
+                    ( { model | error = Just "Image uploaded is too large. Please provide an image 10K or smaller." }, Cmd.none )
+
+                False ->
+                    ( { model | inputs = model.inputs |> setRgImage content }, Cmd.none )
 
         TxtStateRgUserName value ->
             ( { model | inputs = model.inputs |> setRgUserName value }, Cmd.none )
@@ -185,24 +228,45 @@ css =
 
     /* This is meant to be viewed on a phone */
     main { width: 100%; max-width: 450px; margin: auto; }
-    body { font-family: sans-serif; }
+    body { font-family: sans-serif; font-size: 14pt; }
 
     /* Dark mode color scheme */
     @media (prefers-color-scheme: dark) {
         body { background-color: black; }
-        main,input,button { color: white; background-color: black; border-color: white; }
+        main,input,button { color: white; background-color: black; }
+        input,button,select { border: 1px solid white;}
     }
 
     /* Typeography */
-    h1 { font-size: 1.3rem; }
-    h2 { font-size: 1.2rem; }
-    h3 { font-size: 1.1rem; }
+    h1 { font-size: 1.6em; }
+    h2 { font-size: 1.4em; }
+    h3 { font-size: 1.1em; }
 
-    input { font-size: 1.1rem; border: 1px solid; width: 100%; padding: 4px 10px; border-radius: 6px; margin-bottom: 1rem; }
+    /* Very basic input styles */
+    input { font-size: 1em; outline: 1px solid black; width: 100%; padding: 4px 10px; border-radius: 6px; margin-bottom: 1em; }
+    button { font-size: 1em; outline: 1px solid black; width: 100%; padding: 4px 10px; border-radius: 6px; }
+    button:hover { cursor: pointer; }
+    button:hover,input:hover { opacity: 90%; }
+    button:active { opacity: 100%; }
+    button:disabled { opacity: 60%; cursor: inherit; }
+    /* Use outline here so the element doesn't change size */
+    :focus-visible { outline: 1px solid rebeccapurple; border: 1px solid transparent; }
 
-    .padded { padding: 10px; }
-    .userCircle { display: inline-block; position: relative; width: 200px; height: 200px; border-radius: 50%; background-color: gray; }
+    .p-1 { padding: 0.25em; }
+    .p-2 { padding: 0.5em; }
+    .p-4 { padding: 1em; }
+    .pb-1 { padding-bottom: 0.25em; }
+    .pb-2 { padding-bottom: 0.5em; }
+    .pb-4 { padding-bottom: 1em; }
+
+    .flex { display: flex; align-items: center; }
+    .flex-grow { flex-grow: 1; }
+
+    .userCircle { display: inline-block; position: relative; width: 200px; height: 200px; border-radius: 50%; }
+    .userCircle img { position: absolute; height: 100%; width: 100%; border-radius: 50%; }
     .userCircle > div { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); }
+
+    .userCircle.sm { position: relative; width: 100px; height: 100px; }
 
     .error { color: red; }
     """
@@ -232,6 +296,16 @@ errorNode model =
 
         Nothing ->
             text ""
+
+
+txtErrorNode : Maybe String -> Html Msg
+txtErrorNode error =
+    case error of
+        Just msg ->
+            div [ class "error pb-4" ] [ text ("Error: " ++ msg) ]
+
+        Nothing ->
+            div [] []
 
 
 simpleInput : String -> String -> (String -> Msg) -> Html Msg
@@ -266,16 +340,28 @@ userPickerView model =
 
 
 -- RK: TODO show invalid if taking a username someone else has, or if username is empty.
--- Also, spaces are not allowed, nor are capital letters, or numbers. just [a-z]
+-- Also, spaces are not allowed, nor are capital letters, or numbers. just [a-z].
+-- It'd be nice to show a camera icon on the circle if it is default.
 
 
-registerUserView : AllInputs -> Html Msg
-registerUserView inputs =
+registerUserView : AllInputs -> Maybe String -> Html Msg
+registerUserView inputs error =
     div []
         [ h2 [] [ text "Set up new user" ]
+        , div [ class "flex pb-4" ]
+            [ div [] [ text "Select photo" ]
+            , div [ class "flex-grow" ] []
+            , div [ class "userCircle sm", onClick RgImageRequested ]
+                [ img [ src inputs.rgImage ] []
+                ]
+            ]
         , simpleInput "Username" inputs.rgUserName TxtStateRgUserName
         , simpleInput "Display Name" inputs.rgDisplayName TxtStateRgDisplayName
         , simpleInput "Target Calories" inputs.rgTargetCalories TxtStateRgTargetCalories
+        , txtErrorNode error
+        , button
+            [ disabled (not (rgIsValid inputs)) ]
+            [ text "Create User" ]
         ]
 
 
@@ -286,7 +372,7 @@ registerUserView inputs =
 
 view : Model -> Html Msg
 view model =
-    main_ [ class "padded" ]
+    main_ [ class "p-4" ]
         [ h1 [] [ text "Food Journal" ]
         , case model.user of
             Just user ->
@@ -295,7 +381,7 @@ view model =
             Nothing ->
                 case model.registering of
                     True ->
-                        registerUserView model.inputs
+                        registerUserView model.inputs model.error
 
                     False ->
                         userPickerView model
