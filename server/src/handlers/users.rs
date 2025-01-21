@@ -5,7 +5,7 @@ use oxhttp::model::{HeaderName, Request, Response, Status};
 use serde::{Deserialize, Serialize};
 use std::io::Read;
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct UserRequest {
     image: String,
     user_name: String,
@@ -77,20 +77,26 @@ fn post_register(
     body.read_to_end(&mut name)?;
 
     let request = serde_json::from_slice::<UserRequest>(&name)?;
-    register(request, db_env, db)?;
+    let data = register(request.clone(), db_env, db)?;
+    let data = serde_json::to_vec(&data)?;
 
-    Ok(Response::builder(Status::CREATED).build())
+    Ok(Response::builder(Status::CREATED)
+        .with_header(HeaderName::CONTENT_TYPE, "application/json")?
+        .with_body(data)
+        .into())
 }
 
 fn register(
     request: UserRequest,
     db_env: &Env,
     db: &Database<Str, Str>,
-) -> Result<(), heed::Error> {
+) -> Result<UserResponse, heed::Error> {
     let macros = target_macros(request.target_calories);
+
+    // TODO: This could borrow to avoid 2 clones.
     let record = UserDbRecord {
-        image: request.image,
-        display_name: request.display_name,
+        image: request.image.clone(),
+        display_name: request.display_name.clone(),
         target_calories: request.target_calories,
         target_fat: macros.target_fat,
         target_protein: macros.target_protein,
@@ -106,7 +112,15 @@ fn register(
     )?;
     wtxn.commit()?;
 
-    Ok(())
+    Ok(UserResponse {
+        image: request.image,
+        user_name: request.user_name,
+        display_name: request.display_name,
+        target_calories: request.target_calories,
+        target_fat: macros.target_fat,
+        target_protein: macros.target_protein,
+        target_carbohydrate: macros.target_carbohydrate,
+    })
 }
 
 pub fn http_get_users(db_env: &Env, db: &Database<Str, Str>) -> Response {
@@ -116,7 +130,7 @@ pub fn http_get_users(db_env: &Env, db: &Database<Str, Str>) -> Response {
 fn get_users_inner(db_env: &Env, db: &Database<Str, Str>) -> anyhow::Result<Response> {
     let users = get_users(db_env, db)?;
     let users = UsersApiResponse { users };
-    let data = serde_json::to_string(&users)?;
+    let data = serde_json::to_vec(&users)?;
 
     Ok(Response::builder(Status::OK)
         .with_header(HeaderName::CONTENT_TYPE, "application/json")?

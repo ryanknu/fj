@@ -8,7 +8,7 @@ import File.Select as Select
 import Html exposing (Html, button, div, fieldset, h1, h2, img, input, label, legend, main_, node, text)
 import Html.Attributes exposing (class, disabled, placeholder, src, type_, value)
 import Html.Events exposing (onClick, onInput)
-import Http
+import Http exposing (emptyBody, header)
 import Json.Decode as JsonDecode exposing (Decoder, field, string)
 import Json.Encode as JsonEncode exposing (dict)
 import List exposing (isEmpty, map)
@@ -39,7 +39,6 @@ type alias Model =
     , allUsers : List User
     , registering : Bool
     , error : Maybe String
-    , workRemaining : Int
     , debug : String
     }
 
@@ -55,6 +54,7 @@ type alias AllInputs =
 type JobTypes
     = LoadingRegisteredUsers
     | RegisteringUser
+    | LoadingJournal
 
 
 type CommState
@@ -62,6 +62,12 @@ type CommState
     | WorkingOn JobTypes
     | Error String
     | Idle
+
+
+type Screens
+    = SelectUserScreen
+    | RegisterUserScreen
+    | JournalScreen User
 
 
 type alias RegisteredUsersWrapper =
@@ -72,10 +78,10 @@ type alias User =
     { image : String
     , userName : String
     , displayName : String
-    , targetCalories : String
-    , targetFat : String
-    , targetProtein : String
-    , targetCarbohydrate : String
+    , targetCalories : Int
+    , targetFat : Int
+    , targetProtein : Int
+    , targetCarbohydrate : Int
     }
 
 
@@ -96,7 +102,6 @@ defaultModel =
     , allUsers = []
     , registering = False
     , error = Nothing
-    , workRemaining = 0
     , debug = ""
     }
 
@@ -104,6 +109,11 @@ defaultModel =
 setRgUserName : String -> AllInputs -> AllInputs
 setRgUserName value e =
     { e | rgUserName = value }
+
+
+rgUserNameValidator : Regex.Regex
+rgUserNameValidator =
+    Maybe.withDefault Regex.never <| Regex.fromString "^[a-z]+$"
 
 
 setRgDisplayName : String -> AllInputs -> AllInputs
@@ -121,14 +131,33 @@ setRgImage value e =
     { e | rgImage = value }
 
 
+rgTargetCalories : AllInputs -> Int
+rgTargetCalories inputs =
+    Result.withDefault 0 (parseInt inputs.rgTargetCalories)
+
+
 rgIsValid : AllInputs -> Bool
 rgIsValid inputs =
     (length inputs.rgUserName > 0)
         && (length inputs.rgDisplayName > 0)
         && (inputs.rgImage /= defaultInputs.rgImage)
-        && Regex.contains (Maybe.withDefault Regex.never <| Regex.fromString "^[a-z]+$") inputs.rgUserName
-        && Regex.contains (Maybe.withDefault Regex.never <| Regex.fromString "^[0-9]+$") inputs.rgTargetCalories
-        && (Result.withDefault 0 (parseInt inputs.rgTargetCalories) > 1200)
+        && Regex.contains rgUserNameValidator inputs.rgUserName
+        && (rgTargetCalories inputs > 1200)
+
+
+screen : Model -> Screens
+screen m =
+    case m.user of
+        Just user ->
+            JournalScreen user
+
+        Nothing ->
+            case m.registering of
+                True ->
+                    RegisterUserScreen
+
+                False ->
+                    SelectUserScreen
 
 
 
@@ -137,12 +166,7 @@ rgIsValid inputs =
 
 init : () -> ( Model, Cmd Msg )
 init _ =
-    ( defaultModel
-    , Http.get
-        { url = "http://localhost:8080/v1/users"
-        , expect = Http.expectJson LoadRegisteredUsers registeredUsersDecoder
-        }
-    )
+    ( defaultModel, loadUsers )
 
 
 
@@ -160,6 +184,7 @@ subscriptions _ =
 
 type Msg
     = LoadRegisteredUsers (Result Http.Error (List User))
+    | SelectUser User
       -- Text input key handlers
     | TxtStateRgUserName String
     | TxtStateRgDisplayName String
@@ -168,9 +193,12 @@ type Msg
     | RgImageRequested
     | RgImageSelected File
     | RgImageLoaded String
-      -- Register user: expectWhatever with () for success for 201 CREATED
+      -- Register new user messages
     | GotoRegistration
-    | UserRegistered (Result Http.Error ())
+    | RegisterUser
+    | UserRegistered (Result Http.Error User)
+      -- Journals
+    | LoadJournal (Result Http.Error String)
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -182,7 +210,10 @@ update msg model =
                     ( { model | commState = Idle, allUsers = allUsers }, Cmd.none )
 
                 Err n ->
-                    ( { model | workRemaining = 0, commState = Error ("loading config. " ++ errorToString n) }, Cmd.none )
+                    ( { model | commState = Error (errorToString n) }, Cmd.none )
+
+        SelectUser user ->
+            ( { model | user = Just user }, Cmd.none )
 
         RgImageRequested ->
             ( model, Select.file [ "image/png", "image/jpeg" ] RgImageSelected )
@@ -208,12 +239,23 @@ update msg model =
             ( { model | inputs = model.inputs |> setRgTargetCalories value }, Cmd.none )
 
         -- Register new user
-        -- RegisterUser ->
-        --     ( { model | commState = WorkingOn RegisteringUser }, Cmd.none )
+        RegisterUser ->
+            ( { model | commState = WorkingOn RegisteringUser }, registerUser model.inputs.rgImage model.inputs.rgUserName model.inputs.rgDisplayName (rgTargetCalories model.inputs) )
+
         GotoRegistration ->
             ( { model | registering = True }, Cmd.none )
 
+        -- TODO: clear all the inputs while transitioning back to registering = false. Can do this in loadRegisteredUsers though.
+        -- TODO: we also need to call loadJournal here, so, the result here needs to have a User.
         UserRegistered result ->
+            case result of
+                Ok user ->
+                    ( { model | registering = False, commState = WorkingOn LoadingJournal }, loadJournal user )
+
+                Err n ->
+                    ( { model | commState = Error (errorToString n) }, Cmd.none )
+
+        LoadJournal result ->
             ( model, Cmd.none )
 
 
@@ -259,12 +301,12 @@ css =
     .pb-2 { padding-bottom: 0.5em; }
     .pb-4 { padding-bottom: 1em; }
 
-    .flex { display: flex; align-items: center; }
+    .flex { display: flex; align-items: center; justify-content: center }
     .flex-grow { flex-grow: 1; }
 
     .userCircle { display: inline-block; position: relative; width: 200px; height: 200px; border-radius: 50%; }
     .userCircle img { position: absolute; height: 100%; width: 100%; border-radius: 50%; }
-    .userCircle > div { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); }
+    .userCircle > div { position: absolute; bottom: -1em; width: 100%; text-align: center; }
 
     .userCircle.sm { position: relative; width: 100px; height: 100px; }
 
@@ -317,8 +359,9 @@ simpleInput lbl val onChange =
 
 userPickerChoiceView : User -> Html Msg
 userPickerChoiceView user =
-    div [ class "userCircle" ]
-        [ div [] [ text user.displayName ]
+    div [ class "userCircle sm", onClick (SelectUser user) ]
+        [ img [ src user.image ] []
+        , div [] [ text user.displayName ]
         ]
 
 
@@ -326,7 +369,7 @@ userPickerView : Model -> Html Msg
 userPickerView model =
     div []
         [ h2 [] [ text "Select User" ]
-        , div []
+        , div [ class "flex pb-4" ]
             (case isEmpty model.allUsers of
                 True ->
                     [ div [] [ text "There are no users" ] ]
@@ -339,9 +382,12 @@ userPickerView model =
 
 
 
--- RK: TODO show invalid if taking a username someone else has, or if username is empty.
--- Also, spaces are not allowed, nor are capital letters, or numbers. just [a-z].
+-- RK: TODOs
+-- Inline styles for validity would be a nice touch.
 -- It'd be nice to show a camera icon on the circle if it is default.
+-- When the message "there are no users" appears, make the box 118px tall and center the text vertically.
+-- Put selectedUser in localStorage
+-- Register new user needs a back or cancel button.
 
 
 registerUserView : AllInputs -> Maybe String -> Html Msg
@@ -360,31 +406,30 @@ registerUserView inputs error =
         , simpleInput "Target Calories" inputs.rgTargetCalories TxtStateRgTargetCalories
         , txtErrorNode error
         , button
-            [ disabled (not (rgIsValid inputs)) ]
+            [ disabled (not (rgIsValid inputs)), onClick RegisterUser ]
             [ text "Create User" ]
         ]
 
 
-
--- RK notes: If model.user is `Just user`, then render the main application. If it is Nothing, show list of registered users.
---           Maybe, we can save the selected user in localStorage.
+mainJournalView : User -> Html Msg
+mainJournalView user =
+    div [] [ text ("Logged in as: " ++ user.displayName) ]
 
 
 view : Model -> Html Msg
 view model =
     main_ [ class "p-4" ]
         [ h1 [] [ text "Food Journal" ]
-        , case model.user of
-            Just user ->
-                div [] []
+        , errorNode model
+        , case screen model of
+            SelectUserScreen ->
+                userPickerView model
 
-            Nothing ->
-                case model.registering of
-                    True ->
-                        registerUserView model.inputs model.error
+            RegisterUserScreen ->
+                registerUserView model.inputs model.error
 
-                    False ->
-                        userPickerView model
+            JournalScreen user ->
+                mainJournalView user
         , div [] [ text model.debug ]
         , node "style" [] [ text css ]
         ]
@@ -420,7 +465,7 @@ errorToString error =
 
 
 registerUser : String -> String -> String -> Int -> Cmd Msg
-registerUser userName displayName image targetCalories =
+registerUser image userName displayName targetCalories =
     Http.post
         { url = "http://localhost:8080/v1/register"
         , body =
@@ -432,7 +477,30 @@ registerUser userName displayName image targetCalories =
                     , ( "target_calories", JsonEncode.int targetCalories )
                     ]
                 )
-        , expect = Http.expectWhatever UserRegistered
+        , expect = Http.expectJson UserRegistered userDecoder
+        }
+
+
+loadUsers : Cmd Msg
+loadUsers =
+    Http.get
+        { url = "http://localhost:8080/v1/users"
+        , expect = Http.expectJson LoadRegisteredUsers registeredUsersDecoder
+        }
+
+
+loadJournal : User -> Cmd Msg
+loadJournal user =
+    Http.request
+        { method = "GET"
+        , headers =
+            [ header "x-fj-user" user.userName
+            ]
+        , url = "http://localhost:8080/v1/journal"
+        , body = emptyBody
+        , expect = Http.expectJson LoadJournal JsonDecode.string
+        , timeout = Nothing
+        , tracker = Nothing
         }
 
 
@@ -451,7 +519,7 @@ userDecoder =
         (field "image" JsonDecode.string)
         (field "user_name" JsonDecode.string)
         (field "display_name" JsonDecode.string)
-        (field "target_calories" JsonDecode.string)
-        (field "target_fat" JsonDecode.string)
-        (field "target_protein" JsonDecode.string)
-        (field "target_carbohydrate" JsonDecode.string)
+        (field "target_calories" JsonDecode.int)
+        (field "target_fat" JsonDecode.int)
+        (field "target_protein" JsonDecode.int)
+        (field "target_carbohydrate" JsonDecode.int)
