@@ -4,13 +4,19 @@ use heed::{Database, Env};
 use oxhttp::model::{HeaderName, Request, Response, Status};
 use serde::{Deserialize, Serialize};
 use std::io::Read;
+use std::str::FromStr;
 
 #[derive(Clone, Deserialize)]
 pub struct UserRequest {
     image: String,
     user_name: String,
     display_name: String,
-    target_calories: u64,
+    age: u64,
+    gender: Gender,
+    goal: FitnessGoal,
+    factor: ActivityFactor,
+    height: u64,
+    weight: u64,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -63,6 +69,39 @@ struct TargetMacros {
     target_carbohydrate: u64,
 }
 
+#[derive(Deserialize, Clone, Copy)]
+enum ActivityFactor {
+    Sedentary,
+    LightActivity,
+    ModerateActivity,
+    VeryActive,
+    ExtraActive,
+}
+
+#[derive(Deserialize, Clone, Copy)]
+enum Gender {
+    Male,
+    Female,
+}
+
+#[derive(Deserialize, Clone, Copy)]
+enum FitnessGoal {
+    LoseWeight,
+    Maintain,
+}
+
+impl From<ActivityFactor> for f64 {
+    fn from(value: ActivityFactor) -> Self {
+        match value {
+            ActivityFactor::Sedentary => 1.2,
+            ActivityFactor::LightActivity => 1.375,
+            ActivityFactor::ModerateActivity => 1.55,
+            ActivityFactor::VeryActive => 1.725,
+            ActivityFactor::ExtraActive => 1.9,
+        }
+    }
+}
+
 pub fn http_post_register(r: &mut Request, db_env: &Env, db: &Database<Str, Str>) -> Response {
     // This function is a little wrapper that converts anyhow errors into FjErrors to allow ? use.
     post_register(r, db_env, db).unwrap_or_else(|err| FjError::from(err).into())
@@ -92,12 +131,20 @@ fn register(
     db_env: &Env,
     db: &Database<Str, Str>,
 ) -> anyhow::Result<Vec<u8>> {
-    let macros = target_macros(request.target_calories);
+    let target_calories = target_macros2(
+        request.height,
+        request.weight,
+        request.age,
+        request.goal,
+        request.gender,
+        request.factor,
+    );
+    let macros = target_macros(target_calories);
 
     let record = UserDbRecord {
         image: &request.image,
         display_name: &request.display_name,
-        target_calories: request.target_calories,
+        target_calories: target_calories,
         target_fat: macros.target_fat,
         target_protein: macros.target_protein,
         target_carbohydrate: macros.target_carbohydrate,
@@ -116,7 +163,7 @@ fn register(
         image: &request.image,
         user_name: &request.user_name,
         display_name: &request.display_name,
-        target_calories: request.target_calories,
+        target_calories: target_calories,
         target_fat: macros.target_fat,
         target_protein: macros.target_protein,
         target_carbohydrate: macros.target_carbohydrate,
@@ -150,6 +197,31 @@ fn get_users(db_env: &Env, db: &Database<Str, Str>) -> anyhow::Result<Vec<u8>> {
 
     rtxn.commit()?;
     Ok(res)
+}
+
+/// Implements the Mifflin-St. Jeor algorithm for nutrition targets.
+/// TEMPORARY: This returns a calorie goal.
+fn target_macros2(
+    height_cm: u64,
+    weight_kg: u64,
+    age: u64,
+    goal: FitnessGoal,
+    gender: Gender,
+    activity_factor: ActivityFactor,
+) -> u64 {
+    let bmr = (10 * weight_kg) + (height_cm * 25 / 4) - (5 * age);
+    let bmr = match gender {
+        Gender::Male => bmr.saturating_add(5),
+        Gender::Female => bmr.saturating_sub(161),
+    };
+    let factor = match goal {
+        FitnessGoal::LoseWeight => 0.8,
+        FitnessGoal::Maintain => 1.0,
+    };
+
+    let activity_factor: f64 = activity_factor.into();
+    let calories = (bmr as f64 * activity_factor * factor) as u64;
+    calories
 }
 
 /// Sets target macros based on the simple 50/30/20 rule.

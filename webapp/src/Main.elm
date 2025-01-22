@@ -4,7 +4,7 @@ import Array exposing (Array)
 import Browser
 import File exposing (File)
 import File.Select as Select
-import Html exposing (Html, button, div, h1, h2, img, input, main_, node, option, select, text)
+import Html exposing (Html, button, div, h1, h2, img, input, label, main_, node, option, select, text)
 import Html.Attributes as Attributes exposing (class, disabled, placeholder, selected, src, type_, value)
 import Html.Events exposing (onCheck, onClick, onInput)
 import Http exposing (emptyBody, header)
@@ -50,6 +50,9 @@ type alias AllInputs =
     , rgHeight : String
     , rgWeight : String
     , rgActivityFactor : String
+    , rgAge : String
+    , rgGender : String
+    , rgGoal : String
     }
 
 
@@ -95,7 +98,10 @@ defaultInputs =
     , rgImage = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAMAAAAoyzS7AAAAA1BMVEX09PYxuZVGAAAADUlEQVR42gECAP3/AAAAAgABUyucMAAAAABJRU5ErkJggg=="
     , rgHeight = "175"
     , rgWeight = "72"
-    , rgActivityFactor = "light"
+    , rgActivityFactor = "LightActivity"
+    , rgAge = "35"
+    , rgGender = "Male"
+    , rgGoal = "Maintain"
     }
 
 
@@ -144,6 +150,21 @@ setRgWeight value e =
 setRgActivityFactor : String -> AllInputs -> AllInputs
 setRgActivityFactor value e =
     { e | rgActivityFactor = value }
+
+
+setRgAge : String -> AllInputs -> AllInputs
+setRgAge value e =
+    { e | rgAge = value }
+
+
+setRgGender : String -> AllInputs -> AllInputs
+setRgGender value e =
+    { e | rgGender = value }
+
+
+setRgGoal : String -> AllInputs -> AllInputs
+setRgGoal value e =
+    { e | rgGoal = value }
 
 
 setRgImage : String -> AllInputs -> AllInputs
@@ -211,6 +232,11 @@ type Msg
     | TxtStateRgHeight String
     | TxtStateRgWeight String
     | TxtStateRgActivityFactor String
+    | TxtStateRgGenderMale String
+    | TxtStateRgGenderFemale String
+    | TxtStateRgAge String
+    | TxtStateRgWantsWeightLossYes String
+    | TxtStateRgWantsWeightLossNo String
       -- Registration image handler
     | RgImageRequested
     | RgImageSelected File
@@ -268,9 +294,29 @@ update msg model =
         TxtStateRgActivityFactor value ->
             ( { model | inputs = model.inputs |> setRgActivityFactor value }, Cmd.none )
 
+        TxtStateRgAge value ->
+            ( { model | inputs = model.inputs |> setRgAge value }, Cmd.none )
+
+        TxtStateRgGenderMale _ ->
+            ( { model | inputs = model.inputs |> setRgGender "Male" }, Cmd.none )
+
+        TxtStateRgGenderFemale _ ->
+            ( { model | inputs = model.inputs |> setRgGender "Female" }, Cmd.none )
+
+        TxtStateRgWantsWeightLossYes _ ->
+            ( { model | inputs = model.inputs |> setRgGoal "LoseWeight" }, Cmd.none )
+
+        TxtStateRgWantsWeightLossNo _ ->
+            ( { model | inputs = model.inputs |> setRgGoal "Maintain" }, Cmd.none )
+
         -- Register new user
         RegisterUser ->
-            ( { model | commState = WorkingOn RegisteringUser }, registerUser model.inputs.rgImage model.inputs.rgUserName model.inputs.rgDisplayName (rgTargetCalories model.inputs) )
+            case modelToRegisterUserInputs model of
+                Just inputs ->
+                    ( { model | commState = WorkingOn RegisteringUser }, registerUser inputs )
+
+                Nothing ->
+                    ( { model | error = Just "Cannot submit due to invalid values." }, Cmd.none )
 
         GotoRegistration ->
             ( { model | registering = True }, Cmd.none )
@@ -464,6 +510,22 @@ registerUserView inputs error =
         , simpleInput "Username" inputs.rgUserName TxtStateRgUserName
         , simpleInput "Display Name" inputs.rgDisplayName TxtStateRgDisplayName
         , div [ class "flex height" ]
+            [ div [] []
+            , label []
+                [ input [ type_ "radio", Attributes.name "gdr", onInput TxtStateRgGenderMale ] []
+                , text "Male"
+                ]
+            , label []
+                [ input [ type_ "radio", Attributes.name "gdr", onInput TxtStateRgGenderFemale ] []
+                , text "Female"
+                ]
+            ]
+        , div [ class "flex height" ]
+            [ div [] [ text "Age:" ]
+            , input [ type_ "range", Attributes.min "20", Attributes.max "80", value inputs.rgAge, onInput TxtStateRgAge ] []
+            , div [ class "text-right" ] [ text inputs.rgAge ]
+            ]
+        , div [ class "flex height" ]
             [ div [] [ text "Height:" ]
             , input [ type_ "range", Attributes.min "92", Attributes.max "243", value inputs.rgHeight, onInput TxtStateRgHeight ] []
             , div [ class "text-right" ] [ text <| centimetersToFtInView inputs.rgHeight ]
@@ -473,13 +535,24 @@ registerUserView inputs error =
             , input [ type_ "range", Attributes.min "45", Attributes.max "137", value inputs.rgWeight, onInput TxtStateRgWeight ] []
             , div [ class "text-right" ] [ text <| kilogramsToLVbView inputs.rgWeight ]
             ]
+        , div [ class "flex height" ]
+            [ div [] []
+            , label []
+                [ input [ type_ "radio", Attributes.name "wwl", onInput TxtStateRgWantsWeightLossNo ] []
+                , text "Maintain Weight"
+                ]
+            , label []
+                [ input [ type_ "radio", Attributes.name "wwl", onInput TxtStateRgWantsWeightLossYes ] []
+                , text "Lose Weight"
+                ]
+            ]
         , div []
             [ select [ onInput TxtStateRgActivityFactor ]
-                [ option [ value "none" ] [ text "Sedentary (no exercise; desk job)" ]
-                , option [ value "light", selected True ] [ text "Light Activity (exercise 1-3 days per week)" ]
-                , option [ value "moderate" ] [ text "Moderate Activity (exercise 3-5 days per week)" ]
-                , option [ value "very" ] [ text "Very Active (exercise 6-7 days per week)" ]
-                , option [ value "extra" ] [ text "Extra Active (exercise 2x per day)" ]
+                [ option [ value "Sedentary" ] [ text "Sedentary (no exercise; desk job)" ]
+                , option [ value "LightActivity", selected True ] [ text "Light Activity (exercise 1-3 days per week)" ]
+                , option [ value "ModerateActivity" ] [ text "Moderate Activity (exercise 3-5 days per week)" ]
+                , option [ value "VeryActive" ] [ text "Very Active (exercise 6-7 days per week)" ]
+                , option [ value "ExtraActive" ] [ text "Extra Active (exercise 2x per day)" ]
                 ]
             ]
         , simpleInput "Target Calories" inputs.rgTargetCalories TxtStateRgTargetCalories
@@ -543,19 +616,59 @@ errorToString error =
             errorMessage
 
 
-registerUser : String -> String -> String -> Int -> Cmd Msg
-registerUser image userName displayName targetCalories =
+type alias RegisterUserInputs =
+    { image : String
+    , userName : String
+    , displayName : String
+    , gender : String
+    , age : Int
+    , height : Int
+    , weight : Int
+    , goal : String
+    , factor : String
+    }
+
+
+encodeRegisterUserInputs : RegisterUserInputs -> JsonEncode.Value
+encodeRegisterUserInputs inputs =
+    JsonEncode.object
+        [ ( "image", JsonEncode.string inputs.image )
+        , ( "user_name", JsonEncode.string inputs.userName )
+        , ( "display_name", JsonEncode.string inputs.displayName )
+        , ( "gender", JsonEncode.string inputs.gender )
+        , ( "age", JsonEncode.int inputs.age )
+        , ( "height", JsonEncode.int inputs.height )
+        , ( "weight", JsonEncode.int inputs.weight )
+        , ( "goal", JsonEncode.string inputs.goal )
+        , ( "factor", JsonEncode.string inputs.factor )
+        ]
+
+
+modelToRegisterUserInputs : Model -> Maybe RegisterUserInputs
+modelToRegisterUserInputs model =
+    case ( parseInt model.inputs.rgAge, parseInt model.inputs.rgHeight, parseInt model.inputs.rgWeight ) of
+        ( Ok age, Ok height, Ok weight ) ->
+            Just
+                { image = model.inputs.rgImage
+                , userName = model.inputs.rgUserName
+                , displayName = model.inputs.rgDisplayName
+                , gender = model.inputs.rgGender
+                , age = age
+                , height = height
+                , weight = weight
+                , goal = model.inputs.rgGoal
+                , factor = model.inputs.rgActivityFactor
+                }
+
+        _ ->
+            Nothing
+
+
+registerUser : RegisterUserInputs -> Cmd Msg
+registerUser inputs =
     Http.post
         { url = "http://localhost:8080/v1/register"
-        , body =
-            Http.jsonBody
-                (JsonEncode.object
-                    [ ( "image", JsonEncode.string image )
-                    , ( "user_name", JsonEncode.string userName )
-                    , ( "display_name", JsonEncode.string displayName )
-                    , ( "target_calories", JsonEncode.int targetCalories )
-                    ]
-                )
+        , body = Http.jsonBody <| encodeRegisterUserInputs inputs
         , expect = Http.expectJson UserRegistered userDecoder
         }
 
