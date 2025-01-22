@@ -131,7 +131,7 @@ fn register(
     db_env: &Env,
     db: &Database<Str, Str>,
 ) -> anyhow::Result<Vec<u8>> {
-    let target_calories = target_macros2(
+    let (calories, macros) = target_nutrition(
         request.height,
         request.weight,
         request.age,
@@ -139,12 +139,11 @@ fn register(
         request.gender,
         request.factor,
     );
-    let macros = target_macros(target_calories);
 
     let record = UserDbRecord {
         image: &request.image,
         display_name: &request.display_name,
-        target_calories: target_calories,
+        target_calories: calories,
         target_fat: macros.target_fat,
         target_protein: macros.target_protein,
         target_carbohydrate: macros.target_carbohydrate,
@@ -163,7 +162,7 @@ fn register(
         image: &request.image,
         user_name: &request.user_name,
         display_name: &request.display_name,
-        target_calories: target_calories,
+        target_calories: calories,
         target_fat: macros.target_fat,
         target_protein: macros.target_protein,
         target_carbohydrate: macros.target_carbohydrate,
@@ -201,14 +200,15 @@ fn get_users(db_env: &Env, db: &Database<Str, Str>) -> anyhow::Result<Vec<u8>> {
 
 /// Implements the Mifflin-St. Jeor algorithm for nutrition targets.
 /// TEMPORARY: This returns a calorie goal.
-fn target_macros2(
+/// It would be nice if this could allow the user to influence their macro balance.
+fn target_nutrition(
     height_cm: u64,
     weight_kg: u64,
     age: u64,
     goal: FitnessGoal,
     gender: Gender,
     activity_factor: ActivityFactor,
-) -> u64 {
+) -> (u64, TargetMacros) {
     let bmr = (10 * weight_kg) + (height_cm * 25 / 4) - (5 * age);
     let bmr = match gender {
         Gender::Male => bmr.saturating_add(5),
@@ -221,14 +221,13 @@ fn target_macros2(
 
     let activity_factor: f64 = activity_factor.into();
     let calories = (bmr as f64 * activity_factor * factor) as u64;
-    calories
-}
 
-/// Sets target macros based on the simple 50/30/20 rule.
-fn target_macros(target_calories: u64) -> TargetMacros {
-    TargetMacros {
-        target_fat: target_calories / 8,
-        target_protein: target_calories / 12,
-        target_carbohydrate: target_calories / 45,
-    }
+    (
+        calories,
+        TargetMacros {
+            target_fat: calories / 8,
+            target_protein: calories / 12,
+            target_carbohydrate: calories / 45,
+        },
+    )
 }
