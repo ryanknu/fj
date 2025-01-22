@@ -201,6 +201,7 @@ fn get_users(db_env: &Env, db: &Database<Str, Str>) -> anyhow::Result<Vec<u8>> {
 /// Implements the Mifflin-St. Jeor algorithm for nutrition targets.
 /// TEMPORARY: This returns a calorie goal.
 /// It would be nice if this could allow the user to influence their macro balance.
+/// For now it implements a simple 40/40/20 split
 fn target_nutrition(
     height_cm: u64,
     weight_kg: u64,
@@ -225,9 +226,9 @@ fn target_nutrition(
     (
         calories,
         TargetMacros {
-            target_fat: calories / 8,
-            target_protein: calories / 12,
-            target_carbohydrate: calories / 45,
+            target_fat: calories * 2 / 5 / 9,
+            target_protein: calories * 2 / 10 / 4,
+            target_carbohydrate: calories * 2 / 5 / 4,
         },
     )
 }
