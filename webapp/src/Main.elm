@@ -2,15 +2,14 @@ module Main exposing (Model, Msg(..), init, main, update, view)
 
 import Array exposing (Array)
 import Browser
-import Dict exposing (Dict)
 import File exposing (File)
 import File.Select as Select
-import Html exposing (Html, button, div, fieldset, h1, h2, img, input, label, legend, main_, node, text)
-import Html.Attributes exposing (class, disabled, placeholder, src, type_, value)
-import Html.Events exposing (onClick, onInput)
+import Html exposing (Html, button, div, h1, h2, img, input, main_, node, option, select, text)
+import Html.Attributes as Attributes exposing (class, disabled, placeholder, selected, src, type_, value)
+import Html.Events exposing (onCheck, onClick, onInput)
 import Http exposing (emptyBody, header)
-import Json.Decode as JsonDecode exposing (Decoder, field, string)
-import Json.Encode as JsonEncode exposing (dict)
+import Json.Decode as JsonDecode exposing (Decoder, field)
+import Json.Encode as JsonEncode
 import List exposing (isEmpty, map)
 import ParseInt exposing (parseInt)
 import Regex
@@ -48,6 +47,9 @@ type alias AllInputs =
     , rgDisplayName : String
     , rgTargetCalories : String
     , rgImage : String
+    , rgHeight : String
+    , rgWeight : String
+    , rgActivityFactor : String
     }
 
 
@@ -91,6 +93,9 @@ defaultInputs =
     , rgDisplayName = ""
     , rgTargetCalories = "1800"
     , rgImage = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAMAAAAoyzS7AAAAA1BMVEX09PYxuZVGAAAADUlEQVR42gECAP3/AAAAAgABUyucMAAAAABJRU5ErkJggg=="
+    , rgHeight = "175"
+    , rgWeight = "72"
+    , rgActivityFactor = "light"
     }
 
 
@@ -126,6 +131,21 @@ setRgTargetCalories value e =
     { e | rgTargetCalories = value }
 
 
+setRgHeight : String -> AllInputs -> AllInputs
+setRgHeight value e =
+    { e | rgHeight = value }
+
+
+setRgWeight : String -> AllInputs -> AllInputs
+setRgWeight value e =
+    { e | rgWeight = value }
+
+
+setRgActivityFactor : String -> AllInputs -> AllInputs
+setRgActivityFactor value e =
+    { e | rgActivityFactor = value }
+
+
 setRgImage : String -> AllInputs -> AllInputs
 setRgImage value e =
     { e | rgImage = value }
@@ -152,12 +172,11 @@ screen m =
             JournalScreen user
 
         Nothing ->
-            case m.registering of
-                True ->
-                    RegisterUserScreen
+            if m.registering then
+                RegisterUserScreen
 
-                False ->
-                    SelectUserScreen
+            else
+                SelectUserScreen
 
 
 
@@ -189,6 +208,9 @@ type Msg
     | TxtStateRgUserName String
     | TxtStateRgDisplayName String
     | TxtStateRgTargetCalories String
+    | TxtStateRgHeight String
+    | TxtStateRgWeight String
+    | TxtStateRgActivityFactor String
       -- Registration image handler
     | RgImageRequested
     | RgImageSelected File
@@ -222,12 +244,11 @@ update msg model =
             ( model, Task.perform RgImageLoaded (File.toUrl file) )
 
         RgImageLoaded content ->
-            case length content > 10240 of
-                True ->
-                    ( { model | error = Just "Image uploaded is too large. Please provide an image 10K or smaller." }, Cmd.none )
+            if length content > 10240 then
+                ( { model | error = Just "Image uploaded is too large. Please provide an image 10K or smaller." }, Cmd.none )
 
-                False ->
-                    ( { model | inputs = model.inputs |> setRgImage content }, Cmd.none )
+            else
+                ( { model | inputs = model.inputs |> setRgImage content }, Cmd.none )
 
         TxtStateRgUserName value ->
             ( { model | inputs = model.inputs |> setRgUserName value }, Cmd.none )
@@ -237,6 +258,15 @@ update msg model =
 
         TxtStateRgTargetCalories value ->
             ( { model | inputs = model.inputs |> setRgTargetCalories value }, Cmd.none )
+
+        TxtStateRgHeight value ->
+            ( { model | inputs = model.inputs |> setRgHeight value }, Cmd.none )
+
+        TxtStateRgWeight value ->
+            ( { model | inputs = model.inputs |> setRgWeight value }, Cmd.none )
+
+        TxtStateRgActivityFactor value ->
+            ( { model | inputs = model.inputs |> setRgActivityFactor value }, Cmd.none )
 
         -- Register new user
         RegisterUser ->
@@ -307,8 +337,10 @@ css =
     .userCircle { display: inline-block; position: relative; width: 200px; height: 200px; border-radius: 50%; }
     .userCircle img { position: absolute; height: 100%; width: 100%; border-radius: 50%; }
     .userCircle > div { position: absolute; bottom: -1em; width: 100%; text-align: center; }
-
     .userCircle.sm { position: relative; width: 100px; height: 100px; }
+
+    .height div { min-width: 75px; }
+    .text-right { text-align: right; }
 
     .error { color: red; }
     """
@@ -370,15 +402,43 @@ userPickerView model =
     div []
         [ h2 [] [ text "Select User" ]
         , div [ class "flex pb-4" ]
-            (case isEmpty model.allUsers of
-                True ->
-                    [ div [] [ text "There are no users" ] ]
+            (if isEmpty model.allUsers then
+                [ div [] [ text "There are no users" ] ]
 
-                False ->
-                    map userPickerChoiceView model.allUsers
+             else
+                map userPickerChoiceView model.allUsers
             )
         , button [ onClick GotoRegistration ] [ text "Register a new user" ]
         ]
+
+
+inchToFtIn : Int -> ( Int, Int )
+inchToFtIn val =
+    ( val // 12, modBy 12 val )
+
+
+centimetersToFtIn : Int -> ( Int, Int )
+centimetersToFtIn val =
+    inchToFtIn <| round <| toFloat val * 0.393701
+
+
+centimetersToFtInView : String -> String
+centimetersToFtInView val =
+    let
+        ( foot, inch ) =
+            centimetersToFtIn <| Result.withDefault 175 <| parseInt val
+    in
+    String.fromInt foot ++ "', " ++ String.fromInt inch ++ "\""
+
+
+kilogramsToLb : Int -> Int
+kilogramsToLb val =
+    round <| toFloat val * 2.20462
+
+
+kilogramsToLVbView : String -> String
+kilogramsToLVbView val =
+    (String.fromInt <| kilogramsToLb <| Result.withDefault 72 <| parseInt val) ++ "lb"
 
 
 
@@ -403,6 +463,25 @@ registerUserView inputs error =
             ]
         , simpleInput "Username" inputs.rgUserName TxtStateRgUserName
         , simpleInput "Display Name" inputs.rgDisplayName TxtStateRgDisplayName
+        , div [ class "flex height" ]
+            [ div [] [ text "Height:" ]
+            , input [ type_ "range", Attributes.min "92", Attributes.max "243", value inputs.rgHeight, onInput TxtStateRgHeight ] []
+            , div [ class "text-right" ] [ text <| centimetersToFtInView inputs.rgHeight ]
+            ]
+        , div [ class "flex height" ]
+            [ div [] [ text "Weight:" ]
+            , input [ type_ "range", Attributes.min "45", Attributes.max "137", value inputs.rgWeight, onInput TxtStateRgWeight ] []
+            , div [ class "text-right" ] [ text <| kilogramsToLVbView inputs.rgWeight ]
+            ]
+        , div []
+            [ select [ onInput TxtStateRgActivityFactor ]
+                [ option [ value "none" ] [ text "Sedentary (no exercise; desk job)" ]
+                , option [ value "light", selected True ] [ text "Light Activity (exercise 1-3 days per week)" ]
+                , option [ value "moderate" ] [ text "Moderate Activity (exercise 3-5 days per week)" ]
+                , option [ value "very" ] [ text "Very Active (exercise 6-7 days per week)" ]
+                , option [ value "extra" ] [ text "Extra Active (exercise 2x per day)" ]
+                ]
+            ]
         , simpleInput "Target Calories" inputs.rgTargetCalories TxtStateRgTargetCalories
         , txtErrorNode error
         , button

@@ -14,17 +14,19 @@ pub struct UserRequest {
 }
 
 #[derive(Deserialize, Serialize)]
-pub struct UserDbRecord {
-    image: String,
-    display_name: String,
+pub struct UserDbRecord<'a> {
+    #[serde(borrow)]
+    image: &'a str,
+    #[serde(borrow)]
+    display_name: &'a str,
     target_calories: u64,
     target_fat: u64,
     target_protein: u64,
     target_carbohydrate: u64,
 }
 
-impl UserDbRecord {
-    fn into_response_with_username(self, user_name: String) -> UserResponse {
+impl<'a> UserDbRecord<'a> {
+    fn into_response_with_username(self, user_name: &'a str) -> UserResponse {
         UserResponse {
             image: self.image,
             user_name,
@@ -40,15 +42,15 @@ impl UserDbRecord {
 /// This is a thin wrapper for the API response in case we want to add more functionality to the
 /// API later.
 #[derive(Serialize)]
-pub struct UsersApiResponse {
-    users: Vec<UserResponse>,
+pub struct UsersApiResponse<'a> {
+    users: Vec<UserResponse<'a>>,
 }
 
 #[derive(Serialize)]
-pub struct UserResponse {
-    image: String,
-    user_name: String,
-    display_name: String,
+pub struct UserResponse<'a> {
+    image: &'a str,
+    user_name: &'a str,
+    display_name: &'a str,
     target_calories: u64,
     target_fat: u64,
     target_protein: u64,
@@ -78,7 +80,6 @@ fn post_register(
 
     let request = serde_json::from_slice::<UserRequest>(&name)?;
     let data = register(request.clone(), db_env, db)?;
-    let data = serde_json::to_vec(&data)?;
 
     Ok(Response::builder(Status::CREATED)
         .with_header(HeaderName::CONTENT_TYPE, "application/json")?
@@ -90,13 +91,12 @@ fn register(
     request: UserRequest,
     db_env: &Env,
     db: &Database<Str, Str>,
-) -> Result<UserResponse, heed::Error> {
+) -> anyhow::Result<Vec<u8>> {
     let macros = target_macros(request.target_calories);
 
-    // TODO: This could borrow to avoid 2 clones.
     let record = UserDbRecord {
-        image: request.image.clone(),
-        display_name: request.display_name.clone(),
+        image: &request.image,
+        display_name: &request.display_name,
         target_calories: request.target_calories,
         target_fat: macros.target_fat,
         target_protein: macros.target_protein,
@@ -112,15 +112,15 @@ fn register(
     )?;
     wtxn.commit()?;
 
-    Ok(UserResponse {
-        image: request.image,
-        user_name: request.user_name,
-        display_name: request.display_name,
+    Ok(serde_json::to_vec(&UserResponse {
+        image: &request.image,
+        user_name: &request.user_name,
+        display_name: &request.display_name,
         target_calories: request.target_calories,
         target_fat: macros.target_fat,
         target_protein: macros.target_protein,
         target_carbohydrate: macros.target_carbohydrate,
-    })
+    })?)
 }
 
 pub fn http_get_users(db_env: &Env, db: &Database<Str, Str>) -> Response {
@@ -128,9 +128,7 @@ pub fn http_get_users(db_env: &Env, db: &Database<Str, Str>) -> Response {
 }
 
 fn get_users_inner(db_env: &Env, db: &Database<Str, Str>) -> anyhow::Result<Response> {
-    let users = get_users(db_env, db)?;
-    let users = UsersApiResponse { users };
-    let data = serde_json::to_vec(&users)?;
+    let data = get_users(db_env, db)?;
 
     Ok(Response::builder(Status::OK)
         .with_header(HeaderName::CONTENT_TYPE, "application/json")?
@@ -138,19 +136,20 @@ fn get_users_inner(db_env: &Env, db: &Database<Str, Str>) -> anyhow::Result<Resp
         .into())
 }
 
-fn get_users(db_env: &Env, db: &Database<Str, Str>) -> anyhow::Result<Vec<UserResponse>> {
+fn get_users(db_env: &Env, db: &Database<Str, Str>) -> anyhow::Result<Vec<u8>> {
     let mut users = Vec::new();
     let rtxn = db_env.read_txn()?;
 
     for record in db.prefix_iter(&rtxn, "user.")? {
         let (key, value) = record?;
         let record = serde_json::from_str::<UserDbRecord>(value)?;
-        let user_name = String::from(&key[5..]);
-        users.push(record.into_response_with_username(user_name));
+        users.push(record.into_response_with_username(&key[5..]));
     }
 
+    let res = serde_json::to_vec(&UsersApiResponse { users })?;
+
     rtxn.commit()?;
-    Ok(users)
+    Ok(res)
 }
 
 /// Sets target macros based on the simple 50/30/20 rule.
