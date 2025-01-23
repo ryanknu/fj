@@ -358,6 +358,7 @@ css =
     .flex { display: flex; align-items: center; justify-content: center }
     .flex-grow { flex-grow: 1; }
 
+    .user-choice-box { gap: 1em; height: 118.667px; }
     .userCircle { display: inline-block; position: relative; width: 200px; height: 200px; border-radius: 50%; }
     .userCircle img { position: absolute; height: 100%; width: 100%; border-radius: 50%; }
     .userCircle > div { position: absolute; bottom: -1em; width: 100%; text-align: center; }
@@ -439,12 +440,17 @@ userPickerView model =
     div []
         [ h2 [] [ text "Select User" ]
         , paddedView <|
-            div [ class "flex pb-4" ]
-                (if isEmpty model.allUsers then
-                    [ div [] [ text "There are no users" ] ]
+            div [ class "flex pb-4 user-choice-box" ]
+                (case ( model.commState, isEmpty model.allUsers ) of
+                    ( WorkingOn LoadingRegisteredUsers, _ ) ->
+                        -- Don't display any text otherwise there's a text flash while loading.
+                        [ text "" ]
 
-                 else
-                    map userPickerChoiceView model.allUsers
+                    ( _, True ) ->
+                        [ text "There are no users" ]
+
+                    ( _, False ) ->
+                        map userPickerChoiceView model.allUsers
                 )
         , button [ onClick GotoRegistration ] [ text "Register a new user" ]
         ]
