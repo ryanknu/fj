@@ -4,7 +4,7 @@ import Array exposing (Array)
 import Browser
 import File exposing (File)
 import File.Select as Select
-import Html exposing (Html, button, div, h1, h2, img, input, label, main_, node, option, select, text)
+import Html exposing (Html, button, div, h1, h2, img, input, label, main_, nav, node, option, select, text)
 import Html.Attributes as Attributes exposing (class, disabled, placeholder, selected, src, type_, value)
 import Html.Events exposing (onCheck, onClick, onInput)
 import Http exposing (emptyBody, header)
@@ -45,7 +45,6 @@ type alias Model =
 type alias AllInputs =
     { rgUserName : String
     , rgDisplayName : String
-    , rgTargetCalories : String
     , rgImage : String
     , rgHeight : String
     , rgWeight : String
@@ -94,7 +93,6 @@ defaultInputs : AllInputs
 defaultInputs =
     { rgUserName = ""
     , rgDisplayName = ""
-    , rgTargetCalories = "1800"
     , rgImage = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAMAAAAoyzS7AAAAA1BMVEX09PYxuZVGAAAADUlEQVR42gECAP3/AAAAAgABUyucMAAAAABJRU5ErkJggg=="
     , rgHeight = "175"
     , rgWeight = "72"
@@ -132,11 +130,6 @@ setRgDisplayName value e =
     { e | rgDisplayName = value }
 
 
-setRgTargetCalories : String -> AllInputs -> AllInputs
-setRgTargetCalories value e =
-    { e | rgTargetCalories = value }
-
-
 setRgHeight : String -> AllInputs -> AllInputs
 setRgHeight value e =
     { e | rgHeight = value }
@@ -172,18 +165,14 @@ setRgImage value e =
     { e | rgImage = value }
 
 
-rgTargetCalories : AllInputs -> Int
-rgTargetCalories inputs =
-    Result.withDefault 0 (parseInt inputs.rgTargetCalories)
-
-
 rgIsValid : AllInputs -> Bool
 rgIsValid inputs =
     (length inputs.rgUserName > 0)
         && (length inputs.rgDisplayName > 0)
         && (inputs.rgImage /= defaultInputs.rgImage)
+        -- TODO: validate ALL inputs!
+        -- TODO: return a (List (String, String)) of errors, or something
         && Regex.contains rgUserNameValidator inputs.rgUserName
-        && (rgTargetCalories inputs > 1200)
 
 
 screen : Model -> Screens
@@ -228,7 +217,6 @@ type Msg
       -- Text input key handlers
     | TxtStateRgUserName String
     | TxtStateRgDisplayName String
-    | TxtStateRgTargetCalories String
     | TxtStateRgHeight String
     | TxtStateRgWeight String
     | TxtStateRgActivityFactor String
@@ -281,9 +269,6 @@ update msg model =
 
         TxtStateRgDisplayName value ->
             ( { model | inputs = model.inputs |> setRgDisplayName value }, Cmd.none )
-
-        TxtStateRgTargetCalories value ->
-            ( { model | inputs = model.inputs |> setRgTargetCalories value }, Cmd.none )
 
         TxtStateRgHeight value ->
             ( { model | inputs = model.inputs |> setRgHeight value }, Cmd.none )
@@ -345,15 +330,20 @@ css =
     html,body,p,ol,ul,li,dl,dt,dd,blockquote,figure,fieldset,legend,textarea,pre,iframe,hr,h1,h2,h3,h4,h5,h6{margin:0;padding:0}h1,h2,h3,h4,h5,h6{font-size:100%;font-weight:normal}ul{list-style:none}button,input,select{margin:0}html{box-sizing:border-box}*,*::before,*::after{box-sizing:inherit}img,video{height:auto;max-width:100%}iframe{border:0}table{border-collapse:collapse;border-spacing:0}td,th{padding:0}
 
     /* This is meant to be viewed on a phone */
-    main { width: 100%; max-width: 450px; margin: auto; }
+    main { width: 100%; }
+    .phone-width { max-width: 450px; margin: auto; }
     body { font-family: sans-serif; font-size: 14pt; }
+    button { background-color: rgb(22, 163, 74); }
+    select { --webkit-appearance: none; }
 
     /* Dark mode color scheme */
     @media (prefers-color-scheme: dark) {
-        body { background-color: black; }
-        main,input,button { color: white; background-color: black; }
-        input,button,select { border: 1px solid white;}
+        body { background-color: rgb(29, 38, 47); color: white; }
+        input,select { color: white; background-color: rgb(43, 54, 66); }
+        input,button,select { border: 1px solid rgba(255, 255, 255, 0.157); color: white; }
     }
+
+    nav { width: 100%; background-color: rgb(16, 22, 29); }
 
     /* Typeography */
     h1 { font-size: 1.6em; }
@@ -361,7 +351,7 @@ css =
     h3 { font-size: 1.1em; }
 
     /* Very basic input styles */
-    input { font-size: 1em; outline: 1px solid black; width: 100%; padding: 4px 10px; border-radius: 6px; margin-bottom: 1em; }
+    input,select { font-size: 1em; outline: 1px solid black; width: 100%; padding: 4px 10px; border-radius: 6px; margin-bottom: 1em; }
     button { font-size: 1em; outline: 1px solid black; width: 100%; padding: 4px 10px; border-radius: 6px; }
     button:hover { cursor: pointer; }
     button:hover,input:hover { opacity: 90%; }
@@ -447,13 +437,14 @@ userPickerView : Model -> Html Msg
 userPickerView model =
     div []
         [ h2 [] [ text "Select User" ]
-        , div [ class "flex pb-4" ]
-            (if isEmpty model.allUsers then
-                [ div [] [ text "There are no users" ] ]
+        , paddedView <|
+            div [ class "flex pb-4" ]
+                (if isEmpty model.allUsers then
+                    [ div [] [ text "There are no users" ] ]
 
-             else
-                map userPickerChoiceView model.allUsers
-            )
+                 else
+                    map userPickerChoiceView model.allUsers
+                )
         , button [ onClick GotoRegistration ] [ text "Register a new user" ]
         ]
 
@@ -555,7 +546,6 @@ registerUserView inputs error =
                 , option [ value "ExtraActive" ] [ text "Extra Active (exercise 2x per day)" ]
                 ]
             ]
-        , simpleInput "Target Calories" inputs.rgTargetCalories TxtStateRgTargetCalories
         , txtErrorNode error
         , button
             [ disabled (not (rgIsValid inputs)), onClick RegisterUser ]
@@ -568,20 +558,34 @@ mainJournalView user =
     div [] [ text ("Logged in as: " ++ user.displayName) ]
 
 
+phoneWidthView : Html Msg -> Html Msg
+phoneWidthView html =
+    div [ class "phone-width" ] [ html ]
+
+
+paddedView : Html Msg -> Html Msg
+paddedView html =
+    div [ class "p-4" ] [ html ]
+
+
 view : Model -> Html Msg
 view model =
-    main_ [ class "p-4" ]
-        [ h1 [] [ text "Food Journal" ]
+    main_ []
+        [ nav []
+            [ paddedView <| h1 [] [ text "Food Journal" ]
+            ]
         , errorNode model
-        , case screen model of
-            SelectUserScreen ->
-                userPickerView model
+        , phoneWidthView <|
+            paddedView <|
+                case screen model of
+                    SelectUserScreen ->
+                        userPickerView model
 
-            RegisterUserScreen ->
-                registerUserView model.inputs model.error
+                    RegisterUserScreen ->
+                        registerUserView model.inputs model.error
 
-            JournalScreen user ->
-                mainJournalView user
+                    JournalScreen user ->
+                        mainJournalView user
         , div [] [ text model.debug ]
         , node "style" [] [ text css ]
         ]
@@ -603,6 +607,7 @@ errorToString error =
         Http.NetworkError ->
             "Unable to reach the server, check your network connection"
 
+        -- TODO: Coordinate with FjError on the back end to send readable messages to the front end.
         Http.BadStatus 500 ->
             "The server had a problem, try again later"
 

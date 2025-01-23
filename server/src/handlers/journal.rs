@@ -5,6 +5,22 @@ use oxhttp::model::{HeaderName, Headers, Request, Response, Status};
 use std::io::Read;
 use std::str::FromStr;
 
+struct JournalEntry {
+    /// Simple input, what did I eat?
+    text: String,
+    /// This is the journal record date. It is not the date of the timestamp. Format Y-m-d
+    date: String,
+    /// This is the timestamp of the actual journal entry.
+    timestamp: u64,
+    /// This field is only used for adjusting the amounts after initial save.
+    qty: f64,
+    /// Calories and macronutrients
+    calories: u64,
+    carbohydrate: u64,
+    fat: u64,
+    protein: u64,
+}
+
 pub fn extract_user_id(request: &Request) -> anyhow::Result<&str> {
     Ok(request
         .header(&HeaderName::from_str("x-fj-user")?)
