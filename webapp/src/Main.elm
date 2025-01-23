@@ -1,12 +1,11 @@
 module Main exposing (Model, Msg(..), init, main, update, view)
 
-import Array exposing (Array)
 import Browser
 import File exposing (File)
 import File.Select as Select
-import Html exposing (Html, button, div, h1, h2, img, input, label, main_, nav, node, option, select, text)
+import Html exposing (Html, button, div, h1, h2, img, input, main_, nav, node, option, select, text)
 import Html.Attributes as Attributes exposing (class, disabled, placeholder, selected, src, type_, value)
-import Html.Events exposing (onCheck, onClick, onInput)
+import Html.Events exposing (onClick, onInput)
 import Http exposing (emptyBody, header)
 import Json.Decode as JsonDecode exposing (Decoder, field)
 import Json.Encode as JsonEncode
@@ -74,10 +73,6 @@ type Screens
     | JournalScreen User
 
 
-type alias RegisteredUsersWrapper =
-    { users : Array User }
-
-
 type alias User =
     { image : String
     , userName : String
@@ -99,7 +94,7 @@ defaultInputs =
     , rgActivityFactor = "LightActivity"
     , rgAge = "35"
     , rgGender = "Male"
-    , rgGoal = "Maintain"
+    , rgGoal = "Maintain Weight"
     }
 
 
@@ -220,11 +215,9 @@ type Msg
     | TxtStateRgHeight String
     | TxtStateRgWeight String
     | TxtStateRgActivityFactor String
-    | TxtStateRgGenderMale String
-    | TxtStateRgGenderFemale String
+    | TxtStateRgGender String
     | TxtStateRgAge String
-    | TxtStateRgWantsWeightLossYes String
-    | TxtStateRgWantsWeightLossNo String
+    | TxtStateRgGoal String
       -- Registration image handler
     | RgImageRequested
     | RgImageSelected File
@@ -282,17 +275,11 @@ update msg model =
         TxtStateRgAge value ->
             ( { model | inputs = model.inputs |> setRgAge value }, Cmd.none )
 
-        TxtStateRgGenderMale _ ->
-            ( { model | inputs = model.inputs |> setRgGender "Male" }, Cmd.none )
+        TxtStateRgGender value ->
+            ( { model | inputs = model.inputs |> setRgGender value }, Cmd.none )
 
-        TxtStateRgGenderFemale _ ->
-            ( { model | inputs = model.inputs |> setRgGender "Female" }, Cmd.none )
-
-        TxtStateRgWantsWeightLossYes _ ->
-            ( { model | inputs = model.inputs |> setRgGoal "LoseWeight" }, Cmd.none )
-
-        TxtStateRgWantsWeightLossNo _ ->
-            ( { model | inputs = model.inputs |> setRgGoal "Maintain" }, Cmd.none )
+        TxtStateRgGoal value ->
+            ( { model | inputs = model.inputs |> setRgGoal value }, Cmd.none )
 
         -- Register new user
         RegisterUser ->
@@ -301,7 +288,7 @@ update msg model =
                     ( { model | commState = WorkingOn RegisteringUser }, registerUser inputs )
 
                 Nothing ->
-                    ( { model | error = Just "Cannot submit due to invalid values." }, Cmd.none )
+                    ( { model | error = Just "Cannot create user because invalid values were provided." }, Cmd.none )
 
         GotoRegistration ->
             ( { model | registering = True }, Cmd.none )
@@ -351,7 +338,8 @@ css =
     h3 { font-size: 1.1em; }
 
     /* Very basic input styles */
-    input,select { font-size: 1em; outline: 1px solid black; width: 100%; padding: 4px 10px; border-radius: 6px; margin-bottom: 1em; }
+    input,select { font-size: 1em; width: 100%; padding: 4px 10px; border-radius: 6px; margin-bottom: 1em; }
+    input[type=range] { margin-bottom: 0; accent-color: rebeccapurple; }
     button { font-size: 1em; outline: 1px solid black; width: 100%; padding: 4px 10px; border-radius: 6px; }
     button:hover { cursor: pointer; }
     button:hover,input:hover { opacity: 90%; }
@@ -375,8 +363,21 @@ css =
     .userCircle > div { position: absolute; bottom: -1em; width: 100%; text-align: center; }
     .userCircle.sm { position: relative; width: 100px; height: 100px; }
 
-    .height div { min-width: 75px; }
+    .slider-row > div:first-child { min-width: 100px; }
+    .slider-row > div:last-child { min-width: 75px; }
+
     .text-right { text-align: right; }
+    .text-sm { font-size: 0.8em; }
+
+    /* Radio button styles */
+    .radios { width: 100%; display: flex; cursor: pointer; }
+    .radios { padding-bottom: 1em; }
+    .radios > div { background-color: rgb(55, 67, 81); width: 100%; text-align: center; }
+    .radios > div:first-child > div { border-top-left-radius: 6px; border-bottom-left-radius: 6px; }
+    .radios > div:last-child > div { border-top-right-radius: 6px; border-bottom-right-radius: 6px; }
+    .radios > div:first-child { border-top-left-radius: 6px; border-bottom-left-radius: 6px; }
+    .radios > div:last-child { border-top-right-radius: 6px; border-bottom-right-radius: 6px; }
+    .radios div.active { background-color: rgb(43, 54, 66) }
 
     .error { color: red; }
     """
@@ -478,6 +479,28 @@ kilogramsToLVbView val =
     (String.fromInt <| kilogramsToLb <| Result.withDefault 72 <| parseInt val) ++ "lb"
 
 
+radiosView : List String -> String -> (String -> Msg) -> Html Msg
+radiosView options selected onChoose =
+    div [ class "radios text-sm" ] <|
+        List.map
+            (\lbl -> div [ onClick (onChoose lbl) ] [ radioOptionView ( lbl, selected == lbl ) ])
+            options
+
+
+radioOptionView : ( String, Bool ) -> Html Msg
+radioOptionView ( lbl, isActive ) =
+    div
+        [ class
+            (if isActive then
+                "active"
+
+             else
+                ""
+            )
+        ]
+        [ paddedView <| text lbl ]
+
+
 
 -- RK: TODOs
 -- Inline styles for validity would be a nice touch.
@@ -491,52 +514,35 @@ registerUserView : AllInputs -> Maybe String -> Html Msg
 registerUserView inputs error =
     div []
         [ h2 [] [ text "Set up new user" ]
-        , div [ class "flex pb-4" ]
-            [ div [] [ text "Select photo" ]
+        , div [ class "flex pb-4", onClick RgImageRequested ]
+            [ div []
+                [ div [] [ text "Select photo" ]
+                , div [ class "text-sm" ] [ text "Square, 10Kb max" ]
+                ]
             , div [ class "flex-grow" ] []
-            , div [ class "userCircle sm", onClick RgImageRequested ]
+            , div [ class "userCircle sm" ]
                 [ img [ src inputs.rgImage ] []
                 ]
             ]
         , simpleInput "Username" inputs.rgUserName TxtStateRgUserName
         , simpleInput "Display Name" inputs.rgDisplayName TxtStateRgDisplayName
-        , div [ class "flex height" ]
-            [ div [] []
-            , label []
-                [ input [ type_ "radio", Attributes.name "gdr", onInput TxtStateRgGenderMale ] []
-                , text "Male"
-                ]
-            , label []
-                [ input [ type_ "radio", Attributes.name "gdr", onInput TxtStateRgGenderFemale ] []
-                , text "Female"
-                ]
-            ]
-        , div [ class "flex height" ]
+        , radiosView [ "Male", "Female" ] inputs.rgGender TxtStateRgGender
+        , div [ class "flex slider-row pb-4" ]
             [ div [] [ text "Age:" ]
             , input [ type_ "range", Attributes.min "20", Attributes.max "80", value inputs.rgAge, onInput TxtStateRgAge ] []
             , div [ class "text-right" ] [ text inputs.rgAge ]
             ]
-        , div [ class "flex height" ]
+        , div [ class "flex slider-row pb-4" ]
             [ div [] [ text "Height:" ]
             , input [ type_ "range", Attributes.min "92", Attributes.max "243", value inputs.rgHeight, onInput TxtStateRgHeight ] []
             , div [ class "text-right" ] [ text <| centimetersToFtInView inputs.rgHeight ]
             ]
-        , div [ class "flex height" ]
+        , div [ class "flex slider-row pb-4" ]
             [ div [] [ text "Weight:" ]
             , input [ type_ "range", Attributes.min "45", Attributes.max "137", value inputs.rgWeight, onInput TxtStateRgWeight ] []
             , div [ class "text-right" ] [ text <| kilogramsToLVbView inputs.rgWeight ]
             ]
-        , div [ class "flex height" ]
-            [ div [] []
-            , label []
-                [ input [ type_ "radio", Attributes.name "wwl", onInput TxtStateRgWantsWeightLossNo ] []
-                , text "Maintain Weight"
-                ]
-            , label []
-                [ input [ type_ "radio", Attributes.name "wwl", onInput TxtStateRgWantsWeightLossYes ] []
-                , text "Lose Weight"
-                ]
-            ]
+        , radiosView [ "Maintain Weight", "Lose Weight" ] inputs.rgGoal TxtStateRgGoal
         , div []
             [ select [ onInput TxtStateRgActivityFactor ]
                 [ option [ value "Sedentary" ] [ text "Sedentary (no exercise; desk job)" ]
@@ -649,21 +655,40 @@ encodeRegisterUserInputs inputs =
         ]
 
 
+parseRgGoal : String -> Maybe String
+parseRgGoal val =
+    case val of
+        "Maintain Weight" ->
+            Just "Maintain"
+
+        "Lose Weight" ->
+            Just "LoseWeight"
+
+        _ ->
+            Nothing
+
+
 modelToRegisterUserInputs : Model -> Maybe RegisterUserInputs
 modelToRegisterUserInputs model =
     case ( parseInt model.inputs.rgAge, parseInt model.inputs.rgHeight, parseInt model.inputs.rgWeight ) of
         ( Ok age, Ok height, Ok weight ) ->
-            Just
-                { image = model.inputs.rgImage
-                , userName = model.inputs.rgUserName
-                , displayName = model.inputs.rgDisplayName
-                , gender = model.inputs.rgGender
-                , age = age
-                , height = height
-                , weight = weight
-                , goal = model.inputs.rgGoal
-                , factor = model.inputs.rgActivityFactor
-                }
+            -- TODO this nested case is because Elm won't support tuples of > 3 elements. We should fix this properly.
+            case parseRgGoal model.inputs.rgGoal of
+                Just goal ->
+                    Just
+                        { image = model.inputs.rgImage
+                        , userName = model.inputs.rgUserName
+                        , displayName = model.inputs.rgDisplayName
+                        , gender = model.inputs.rgGender
+                        , age = age
+                        , height = height
+                        , weight = weight
+                        , goal = goal
+                        , factor = model.inputs.rgActivityFactor
+                        }
+
+                _ ->
+                    Nothing
 
         _ ->
             Nothing
