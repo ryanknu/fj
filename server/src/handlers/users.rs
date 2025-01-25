@@ -1,6 +1,7 @@
 use crate::error::FjError;
 use heed::types::Str;
 use heed::{Database, Env};
+use jiff::Timestamp;
 use oxhttp::model::{HeaderName, Request, Response, Status};
 use serde::{Deserialize, Serialize};
 use std::io::Read;
@@ -25,6 +26,8 @@ pub struct UserDbRecord<'a> {
     image: &'a str,
     #[serde(borrow)]
     display_name: &'a str,
+    #[serde(borrow)]
+    current_date: &'a str,
     target_calories: u64,
     target_fat: u64,
     target_protein: u64,
@@ -36,6 +39,7 @@ impl<'a> UserDbRecord<'a> {
         UserResponse {
             image: self.image,
             user_name,
+            current_date: self.current_date,
             display_name: self.display_name,
             target_calories: self.target_calories,
             target_fat: self.target_fat,
@@ -57,6 +61,7 @@ pub struct UserResponse<'a> {
     image: &'a str,
     user_name: &'a str,
     display_name: &'a str,
+    current_date: &'a str,
     target_calories: u64,
     target_fat: u64,
     target_protein: u64,
@@ -140,9 +145,12 @@ fn register(
         request.factor,
     );
 
+    let current_date = Timestamp::now().to_string();
+
     let record = UserDbRecord {
         image: &request.image,
         display_name: &request.display_name,
+        current_date: &current_date[..10],
         target_calories: calories,
         target_fat: macros.target_fat,
         target_protein: macros.target_protein,
@@ -162,6 +170,7 @@ fn register(
         image: &request.image,
         user_name: &request.user_name,
         display_name: &request.display_name,
+        current_date: &current_date,
         target_calories: calories,
         target_fat: macros.target_fat,
         target_protein: macros.target_protein,

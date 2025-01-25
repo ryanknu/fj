@@ -1,12 +1,13 @@
 module Main exposing (Model, Msg(..), init, main, update, view)
 
 import Browser
+import Date
 import File exposing (File)
 import File.Select as Select
-import Html exposing (Html, button, div, h1, h2, img, input, main_, nav, node, option, select, text)
+import Html exposing (Html, button, div, h1, h2, img, input, main_, nav, node, option, rt, select, text)
 import Html.Attributes as Attributes exposing (class, disabled, placeholder, selected, src, type_, value)
 import Html.Events exposing (onClick, onInput)
-import Http exposing (emptyBody, header)
+import Http exposing (Body, emptyBody, header)
 import Json.Decode as JsonDecode exposing (Decoder, field)
 import Json.Encode as JsonEncode
 import List exposing (isEmpty, map)
@@ -77,6 +78,7 @@ type alias User =
     { image : String
     , userName : String
     , displayName : String
+    , currentDate : String
     , targetCalories : Int
     , targetFat : Int
     , targetProtein : Int
@@ -160,6 +162,11 @@ setRgImage value e =
     { e | rgImage = value }
 
 
+setCurrentDate : User -> String -> User
+setCurrentDate user newDate =
+    { user | currentDate = newDate }
+
+
 rgIsValid : AllInputs -> Bool
 rgIsValid inputs =
     (length inputs.rgUserName > 0)
@@ -190,7 +197,7 @@ screen m =
 
 init : () -> ( Model, Cmd Msg )
 init _ =
-    ( defaultModel, loadUsers )
+    ( defaultModel, fjApiLoadUsers )
 
 
 
@@ -227,6 +234,8 @@ type Msg
     | RegisterUser
     | UserRegistered (Result Http.Error User)
       -- Journals
+    | EndDayRequest
+    | EndDayResponse (Result Http.Error String)
     | LoadJournal (Result Http.Error String)
 
 
@@ -242,7 +251,8 @@ update msg model =
                     ( { model | commState = Error (errorToString n) }, Cmd.none )
 
         SelectUser user ->
-            ( { model | user = Just user }, Cmd.none )
+            -- TODO: CommState needs to be WorkingOn LoadingJournal, and we don't transition until the journal is loaded.
+            ( { model | user = Just user }, fjApiLoadJournal user )
 
         RgImageRequested ->
             ( model, Select.file [ "image/png", "image/jpeg" ] RgImageSelected )
@@ -285,7 +295,7 @@ update msg model =
         RegisterUser ->
             case modelToRegisterUserInputs model of
                 Just inputs ->
-                    ( { model | commState = WorkingOn RegisteringUser }, registerUser inputs )
+                    ( { model | commState = WorkingOn RegisteringUser }, fjApiRegisterUser inputs )
 
                 Nothing ->
                     ( { model | error = Just "Cannot create user because invalid values were provided." }, Cmd.none )
@@ -294,14 +304,33 @@ update msg model =
             ( { model | registering = True }, Cmd.none )
 
         -- TODO: clear all the inputs while transitioning back to registering = false. Can do this in loadRegisteredUsers though.
-        -- TODO: we also need to call loadJournal here, so, the result here needs to have a User.
         UserRegistered result ->
             case result of
                 Ok user ->
-                    ( { model | registering = False, commState = WorkingOn LoadingJournal }, loadJournal user )
+                    ( { model | registering = False, commState = WorkingOn LoadingJournal }, fjApiLoadJournal user )
 
                 Err n ->
                     ( { model | commState = Error (errorToString n) }, Cmd.none )
+
+        EndDayRequest ->
+            case model.user of
+                Nothing ->
+                    ( { model | error = Just "Not logged in" }, Cmd.none )
+
+                -- TODO: Set a working indicator, in case back end is slow.
+                Just user ->
+                    ( model, fjApiEndDay user )
+
+        EndDayResponse result ->
+            case ( result, model.user ) of
+                ( Ok date, Just user ) ->
+                    ( { model | commState = Idle, user = Just <| setCurrentDate user date }, Cmd.none )
+
+                ( Err n, _ ) ->
+                    ( { model | commState = Error (errorToString n) }, Cmd.none )
+
+                _ ->
+                    ( { model | commState = Error "Something went wrong" }, Cmd.none )
 
         LoadJournal result ->
             ( model, Cmd.none )
@@ -359,10 +388,10 @@ css =
     .flex-grow { flex-grow: 1; }
 
     .user-choice-box { gap: 1em; height: 118.667px; }
-    .userCircle { display: inline-block; position: relative; width: 200px; height: 200px; border-radius: 50%; }
+    .userCircle { display: inline-block; position: relative; width: 100px; height: 100px; border-radius: 50%; }
     .userCircle img { position: absolute; height: 100%; width: 100%; border-radius: 50%; }
     .userCircle > div { position: absolute; bottom: -1em; width: 100%; text-align: center; }
-    .userCircle.sm { position: relative; width: 100px; height: 100px; }
+    .userCircle.sm { position: relative; width: 33px; height: 33px; }
 
     .slider-row > div:first-child { min-width: 100px; }
     .slider-row > div:last-child { min-width: 75px; }
@@ -429,7 +458,7 @@ simpleInput lbl val onChange =
 
 userPickerChoiceView : User -> Html Msg
 userPickerChoiceView user =
-    div [ class "userCircle sm", onClick (SelectUser user) ]
+    div [ class "userCircle", onClick (SelectUser user) ]
         [ img [ src user.image ] []
         , div [] [ text user.displayName ]
         ]
@@ -438,7 +467,7 @@ userPickerChoiceView user =
 userPickerView : Model -> Html Msg
 userPickerView model =
     div []
-        [ h2 [] [ text "Select User" ]
+        [ h2 [] [ text "Select Journal" ]
         , paddedView <|
             div [ class "flex pb-4 user-choice-box" ]
                 (case ( model.commState, isEmpty model.allUsers ) of
@@ -452,7 +481,7 @@ userPickerView model =
                     ( _, False ) ->
                         map userPickerChoiceView model.allUsers
                 )
-        , button [ onClick GotoRegistration ] [ text "Register a new user" ]
+        , button [ onClick GotoRegistration ] [ text "Start a new journal" ]
         ]
 
 
@@ -514,19 +543,20 @@ radioOptionView ( lbl, isActive ) =
 -- When the message "there are no users" appears, make the box 118px tall and center the text vertically.
 -- Put selectedUser in localStorage
 -- Register new user needs a back or cancel button.
+-- Icons: fat: bottle-droplet | carb: bowl-rice | protein: bacon?
 
 
 registerUserView : AllInputs -> Maybe String -> Html Msg
 registerUserView inputs error =
     div []
-        [ h2 [] [ text "Set up new user" ]
+        [ h2 [] [ text "Start a new journal" ]
         , div [ class "flex pb-4", onClick RgImageRequested ]
             [ div []
                 [ div [] [ text "Select photo" ]
                 , div [ class "text-sm" ] [ text "Square, 10Kb max" ]
                 ]
             , div [ class "flex-grow" ] []
-            , div [ class "userCircle sm" ]
+            , div [ class "userCircle" ]
                 [ img [ src inputs.rgImage ] []
                 ]
             ]
@@ -560,14 +590,50 @@ registerUserView inputs error =
             ]
         , txtErrorNode error
         , button
-            [ disabled (not (rgIsValid inputs)), onClick RegisterUser ]
+            [ disabled <| not <| rgIsValid inputs, onClick RegisterUser ]
             [ text "Create User" ]
+        ]
+
+
+currentDateView : User -> Html Msg
+currentDateView user =
+    div [ class "text-sm" ]
+        [ case Date.fromIsoString user.currentDate of
+            Ok date ->
+                text <| (String.fromInt <| Date.weekdayNumber date) ++ " | " ++ user.currentDate
+
+            Err msg ->
+                text <| "error: " ++ msg
         ]
 
 
 mainJournalView : User -> Html Msg
 mainJournalView user =
-    div [] [ text ("Logged in as: " ++ user.displayName) ]
+    div []
+        [ text <| "Logged in as: " ++ user.displayName
+        , currentDateView user
+        , button [ onClick EndDayRequest ] [ text "End Day" ]
+        ]
+
+
+topNavView : Maybe User -> List (Html Msg)
+topNavView maybeUser =
+    case maybeUser of
+        Nothing ->
+            [ paddedView <| h1 [] [ text "Food Journal" ]
+            , div [ class "flex-grow" ] []
+            ]
+
+        Just user ->
+            [ paddedSmView <|
+                div []
+                    [ div [ class "userCircle sm" ]
+                        [ img [ src user.image ] []
+                        ]
+                    ]
+            , div [ class "flex-grow" ] []
+            , paddedView <| currentDateView <| user
+            ]
 
 
 phoneWidthView : Html Msg -> Html Msg
@@ -580,12 +646,15 @@ paddedView html =
     div [ class "p-4" ] [ html ]
 
 
+paddedSmView : Html Msg -> Html Msg
+paddedSmView html =
+    div [ class "p-2" ] [ html ]
+
+
 view : Model -> Html Msg
 view model =
     main_ []
-        [ nav []
-            [ paddedView <| h1 [] [ text "Food Journal" ]
-            ]
+        [ nav [ class "flex" ] <| topNavView model.user
         , errorNode model
         , phoneWidthView <|
             paddedView <|
@@ -600,6 +669,7 @@ view model =
                         mainJournalView user
         , div [] [ text model.debug ]
         , node "style" [] [ text css ]
+        , node "meta" [ Attributes.name "viewport", Attributes.attribute "content" "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" ] []
         ]
 
 
@@ -700,35 +770,104 @@ modelToRegisterUserInputs model =
             Nothing
 
 
-registerUser : RegisterUserInputs -> Cmd Msg
-registerUser inputs =
-    Http.post
-        { url = "http://localhost:8080/v1/register"
-        , body = Http.jsonBody <| encodeRegisterUserInputs inputs
-        , expect = Http.expectJson UserRegistered userDecoder
-        }
-
-
-loadUsers : Cmd Msg
-loadUsers =
-    Http.get
-        { url = "http://localhost:8080/v1/users"
-        , expect = Http.expectJson LoadRegisteredUsers registeredUsersDecoder
-        }
-
-
-loadJournal : User -> Cmd Msg
-loadJournal user =
+fjHttpRequest :
+    { method : String
+    , headers : List Http.Header
+    , path : String
+    , body : Http.Body
+    , expect : Http.Expect Msg
+    , user : Maybe User
+    }
+    -> Cmd Msg
+fjHttpRequest r =
     Http.request
-        { method = "GET"
+        { method = r.method
         , headers =
-            [ header "x-fj-user" user.userName
-            ]
-        , url = "http://localhost:8080/v1/journal"
-        , body = emptyBody
-        , expect = Http.expectJson LoadJournal JsonDecode.string
+            -- TODO: add universal accept header; add content-type header for post
+            List.append r.headers <| Maybe.withDefault [] <| Maybe.map (\n -> [ header "x-fj-user" n.userName ]) r.user
+
+        -- TODO: Manage this URL globally somehow.
+        , url = "http://localhost:8080/v1" ++ r.path
+        , body = r.body
+        , expect = r.expect
         , timeout = Nothing
         , tracker = Nothing
+        }
+
+
+fjHttpGet :
+    { path : String
+    , expect : Http.Expect Msg
+    , user : Maybe User
+    }
+    -> Cmd Msg
+fjHttpGet r =
+    fjHttpRequest
+        { method = "GET"
+        , headers = []
+        , path = r.path
+        , body = emptyBody
+        , expect = r.expect
+        , user = r.user
+        }
+
+
+fjHttpPost :
+    { path : String
+    , expect : Http.Expect Msg
+    , body : a
+    , bodyEncoder : a -> JsonEncode.Value
+    , user : Maybe User
+    }
+    -> Cmd Msg
+fjHttpPost r =
+    fjHttpRequest
+        { method = "POST"
+        , headers =
+            [ header "content-type" "application/json"
+            ]
+        , path = r.path
+        , body = Http.jsonBody <| r.bodyEncoder r.body
+        , expect = r.expect
+        , user = r.user
+        }
+
+
+fjApiRegisterUser : RegisterUserInputs -> Cmd Msg
+fjApiRegisterUser inputs =
+    fjHttpPost
+        { path = "/register"
+        , body = inputs
+        , bodyEncoder = encodeRegisterUserInputs
+        , expect = Http.expectJson UserRegistered userDecoder
+        , user = Nothing
+        }
+
+
+fjApiLoadUsers : Cmd Msg
+fjApiLoadUsers =
+    fjHttpGet
+        { path = "/users"
+        , expect = Http.expectJson LoadRegisteredUsers registeredUsersDecoder
+        , user = Nothing
+        }
+
+
+fjApiLoadJournal : User -> Cmd Msg
+fjApiLoadJournal user =
+    fjHttpGet
+        { path = "/journal"
+        , expect = Http.expectJson LoadJournal JsonDecode.string
+        , user = Just user
+        }
+
+
+fjApiEndDay : User -> Cmd Msg
+fjApiEndDay user =
+    fjHttpGet
+        { path = "/end-day"
+        , expect = Http.expectJson EndDayResponse fjApiDecoderCurrentDate
+        , user = Just user
         }
 
 
@@ -741,12 +880,18 @@ registeredUsersDecoder =
     field "users" (JsonDecode.list userDecoder)
 
 
+fjApiDecoderCurrentDate : Decoder String
+fjApiDecoderCurrentDate =
+    field "current_date" JsonDecode.string
+
+
 userDecoder : Decoder User
 userDecoder =
-    JsonDecode.map7 User
+    JsonDecode.map8 User
         (field "image" JsonDecode.string)
         (field "user_name" JsonDecode.string)
         (field "display_name" JsonDecode.string)
+        (field "current_date" JsonDecode.string)
         (field "target_calories" JsonDecode.int)
         (field "target_fat" JsonDecode.int)
         (field "target_protein" JsonDecode.int)

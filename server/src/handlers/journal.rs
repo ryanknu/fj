@@ -1,4 +1,5 @@
 use crate::error::FjError;
+use crate::state::extract_user_id;
 use heed::types::Str;
 use heed::{Database, Env};
 use oxhttp::model::{HeaderName, Headers, Request, Response, Status};
@@ -10,9 +11,7 @@ struct JournalEntry {
     text: String,
     /// This is the journal record date. It is not the date of the timestamp. Format Y-m-d
     date: String,
-    /// This is the timestamp of the actual journal entry.
-    timestamp: u64,
-    /// This field is only used for adjusting the amounts after initial save.
+    /// This field is only used for adjusting the amounts after initial save. I don't really care the units.
     qty: f64,
     /// Calories and macronutrients
     calories: u64,
@@ -21,11 +20,9 @@ struct JournalEntry {
     protein: u64,
 }
 
-pub fn extract_user_id(request: &Request) -> anyhow::Result<&str> {
-    Ok(request
-        .header(&HeaderName::from_str("x-fj-user")?)
-        .unwrap()
-        .to_str()?)
+struct JournalEntryRequest {
+    text: String,
+    date: String,
 }
 
 pub fn journal(r: &mut Request, db_env: &Env, db: &Database<Str, Str>) -> Response {

@@ -59,6 +59,7 @@ fn main() {
         "/" => Response::builder(Status::OK).with_body("home"),
         "/v1/users" => handlers::users::http_get_users(&env, &db),
         "/v1/register" => handlers::users::http_post_register(request, &env, &db),
+        "/v1/end-day" => handlers::end_day::http_end_day(request, &env, &db),
         "/journal" => handlers::journal::journal(request, &env, &db),
         _ => Response::builder(Status::NOT_FOUND).build(),
     });
