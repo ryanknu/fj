@@ -37,6 +37,7 @@ type alias Model =
     , inputs : AllInputs
     , allUsers : List User
     , registering : Bool
+    , composing : Bool
     , error : Maybe String
     , debug : String
     }
@@ -71,7 +72,8 @@ type CommState
 type Screens
     = SelectUserScreen
     | RegisterUserScreen
-    | JournalScreen User
+    | JournalScreen
+    | Composing
 
 
 type alias User =
@@ -107,6 +109,7 @@ defaultModel =
     , inputs = defaultInputs
     , allUsers = []
     , registering = False
+    , composing = False
     , error = Nothing
     , debug = ""
     }
@@ -181,7 +184,11 @@ screen : Model -> Screens
 screen m =
     case m.user of
         Just user ->
-            JournalScreen user
+            if m.composing then
+                Composing
+
+            else
+                JournalScreen
 
         Nothing ->
             if m.registering then
@@ -233,6 +240,7 @@ type Msg
     | GotoRegistration
     | RegisterUser
     | UserRegistered (Result Http.Error User)
+    | GotoCompose
       -- Journals
     | EndDayRequest
     | EndDayResponse (Result Http.Error String)
@@ -311,6 +319,9 @@ update msg model =
 
                 Err n ->
                     ( { model | commState = Error (errorToString n) }, Cmd.none )
+
+        GotoCompose ->
+            ( { model | composing = True }, Cmd.none )
 
         EndDayRequest ->
             case model.user of
@@ -409,7 +420,7 @@ css =
     .radios > div:last-child { border-top-right-radius: 6px; border-bottom-right-radius: 6px; }
     .radios div.active { background-color: rgb(43, 54, 66) }
 
-    .error { color: red; }
+    .error { background-color: rgb(186, 76, 64); padding: 0.25em; text-align: center; }
     """
 
 
@@ -433,7 +444,7 @@ errorNode : Model -> Html Msg
 errorNode model =
     case reduceCommStateToMaybe model.commState of
         Just doing ->
-            div [ class "error" ] [ text ("Error while " ++ doing) ]
+            div [ class "error" ] [ text ("Communication error: " ++ doing) ]
 
         Nothing ->
             text ""
@@ -458,7 +469,7 @@ simpleInput lbl val onChange =
 
 userPickerChoiceView : User -> Html Msg
 userPickerChoiceView user =
-    div [ class "userCircle", onClick (SelectUser user) ]
+    div [ class "userCircle", onClick <| SelectUser user ]
         [ img [ src user.image ] []
         , div [] [ text user.displayName ]
         ]
@@ -591,7 +602,7 @@ registerUserView inputs error =
         , txtErrorNode error
         , button
             [ disabled <| not <| rgIsValid inputs, onClick RegisterUser ]
-            [ text "Create User" ]
+            [ text "Create Journal" ]
         ]
 
 
@@ -607,12 +618,51 @@ currentDateView user =
         ]
 
 
-mainJournalView : User -> Html Msg
-mainJournalView user =
+journalView : Html Msg
+journalView =
     div []
-        [ text <| "Logged in as: " ++ user.displayName
-        , currentDateView user
+        [ text <| "Logged in as: "
+        , button [ onClick GotoCompose ] [ text "Add Entry" ]
         , button [ onClick EndDayRequest ] [ text "End Day" ]
+        ]
+
+
+composeView : Html Msg
+composeView =
+    -- TODO: Autocomplete foods that have been entered before -OR- OpenFoodFacts foods.
+    div []
+        [ h2 [] [ text "New Entry" ]
+        , simpleInput "Enter food name" "" TxtStateRgUserName
+        , div [ class "flex slider-row pb-4" ]
+            [ div [] [ text "Amount:" ]
+            , input [ type_ "range", Attributes.min "0", Attributes.max "100", value "", onInput TxtStateRgWeight ] []
+            , div [ class "text-right" ] [ text <| kilogramsToLVbView "0" ]
+            , select [] <|
+                map
+                    (\v -> option [] [ text v ])
+                    [ "Cups", "Grams", "Ounces", "Pounds" ]
+            ]
+        , div [ class "flex slider-row pb-4" ]
+            [ div [] [ text "Calories:" ]
+            , input [ type_ "range", Attributes.min "10", Attributes.max "200", value "", onInput TxtStateRgWeight ] []
+            , div [ class "text-right" ] [ text <| kilogramsToLVbView "0" ]
+            ]
+        , div [ class "flex slider-row pb-4" ]
+            [ div [] [ text "Carbohydrate:" ]
+            , input [ type_ "range", Attributes.min "10", Attributes.max "200", value "", onInput TxtStateRgWeight ] []
+            , div [ class "text-right" ] [ text <| kilogramsToLVbView "0" ]
+            ]
+        , div [ class "flex slider-row pb-4" ]
+            [ div [] [ text "Fat:" ]
+            , input [ type_ "range", Attributes.min "10", Attributes.max "200", value "", onInput TxtStateRgWeight ] []
+            , div [ class "text-right" ] [ text <| kilogramsToLVbView "0" ]
+            ]
+        , div [ class "flex slider-row pb-4" ]
+            [ div [] [ text "Protein:" ]
+            , input [ type_ "range", Attributes.min "10", Attributes.max "200", value "", onInput TxtStateRgWeight ] []
+            , div [ class "text-right" ] [ text <| kilogramsToLVbView "0" ]
+            ]
+        , button [ onClick GotoCompose ] [ text "Enter" ]
         ]
 
 
@@ -665,8 +715,11 @@ view model =
                     RegisterUserScreen ->
                         registerUserView model.inputs model.error
 
-                    JournalScreen user ->
-                        mainJournalView user
+                    JournalScreen ->
+                        journalView
+
+                    Composing ->
+                        composeView
         , div [] [ text model.debug ]
         , node "style" [] [ text css ]
         , node "meta" [ Attributes.name "viewport", Attributes.attribute "content" "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" ] []
@@ -681,23 +734,23 @@ errorToString : Http.Error -> String
 errorToString error =
     case error of
         Http.BadUrl url ->
-            "The URL " ++ url ++ " was invalid"
+            "the URI \"" ++ url ++ "\" was invalid."
 
         Http.Timeout ->
-            "Unable to reach the server, try again"
+            "unable to reach the server, try again."
 
         Http.NetworkError ->
-            "Unable to reach the server, check your network connection"
+            "unable to reach the server, check your network connection. This app may not work properly."
 
         -- TODO: Coordinate with FjError on the back end to send readable messages to the front end.
         Http.BadStatus 500 ->
-            "The server had a problem, try again later"
+            "the server reported a problem, try again later."
 
         Http.BadStatus 400 ->
-            "Verify your information and try again"
+            "verify your information and try again."
 
-        Http.BadStatus _ ->
-            "Unknown error"
+        Http.BadStatus n ->
+            "unknown error (HTTP status: " ++ String.fromInt n ++ ")"
 
         Http.BadBody errorMessage ->
             errorMessage

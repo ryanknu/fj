@@ -16,26 +16,22 @@ mod state;
 ///   - Macro bars across the top (fat, protein, carb, calories), they can be really small, like 8px font
 ///   - Add a food by name
 ///   - Add a food by barcode (camera/scanner).. may not care
-///   - End day
-///   - Journal needs a day marker... if something is eaten at 01:00, it still counts towards the prev day
 /// - [ ] Back end probably in axum
 /// - [ ] Manually enter macros
-/// - [ ] Button to end prev day and new day
 /// - [ ] Query OpenFoodFacts in real time
 /// - [ ] Utility to download OpenFoodFacts database
 ///   - [ ] Requires a Meilisearch instance
 /// - [ ] Automatic entries (e.g. monster daily, or skip breakfast?)
-/// - [ ] Dockerfile based on linuxserver (see: https://github.com/linuxserver/docker-emby/blob/master/Dockerfile)
+/// - [ ] Containerfile based on linuxserver (see: https://github.com/linuxserver/docker-emby/blob/master/Dockerfile)
 /// - [ ] Github docker release XML/JSON compatible with Unraid
-/// - [ ] Multiple users, identified by name is fine
 /// - [ ] Use LMDB (heed/heed3) for primary storage in a /data dir
 ///
 ///
 ///
 /// API:
 /// - GET /v1/<user>/journal - retrieves the journal for the user for the last 31 days
+/// - GET /v1/foods - returns all food items that were created by this user, for front-end search.
 /// - GET /v1/food?term= - searches for food by term or barcode
-/// - GET /v1/macro-targets - retrieves ideal macro goals based on criteria such as height, weight, etc. (OPTIONAL)
 /// - POST /v1/load-off - If meilisearch is configured, this will start a download and index of the OpenFoodFacts database
 /// - GET /v1/load-off - Retrieves the status of any current OpenFoodFacts database download.
 /// - POST /v1/<user>/journal - Upserts an entry in the journal. Date and ID must be specified. Daily totals are updated.

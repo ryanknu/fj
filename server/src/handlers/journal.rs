@@ -1,19 +1,33 @@
 use crate::error::FjError;
+use crate::handlers::end_day::get_current_date;
 use crate::state::extract_user_id;
 use heed::types::Str;
 use heed::{Database, Env};
 use oxhttp::model::{HeaderName, Headers, Request, Response, Status};
+use serde::{Deserialize, Serialize};
 use std::io::Read;
 use std::str::FromStr;
+use std::time::SystemTime;
 
+#[derive(Deserialize)]
 struct JournalEntry {
     /// Simple input, what did I eat?
     text: String,
-    /// This is the journal record date. It is not the date of the timestamp. Format Y-m-d
-    date: String,
-    /// This field is only used for adjusting the amounts after initial save. I don't really care the units.
     qty: f64,
+    qty_units: String,
     /// Calories and macronutrients
+    calories: u64,
+    carbohydrate: u64,
+    fat: u64,
+    protein: u64,
+}
+
+#[derive(Serialize)]
+struct JournalEntryDbRecord<'a> {
+    text: &'a str,
+    timestamp: u128,
+    qty: f64,
+    qty_units: &'a str,
     calories: u64,
     carbohydrate: u64,
     fat: u64,
@@ -51,15 +65,43 @@ fn post_journal(
     db_env: &Env,
     db: &Database<Str, Str>,
 ) -> anyhow::Result<Response> {
-    let mut name = String::new();
+    // Read the request payload
+    let mut buf = Vec::new();
     let mut body = r.body_mut();
-    body.read_to_string(&mut name)?;
+    body.read_to_end(&mut buf)?;
+    let payload = serde_json::from_slice::<JournalEntry>(&buf)?;
 
+    // Get the user's ID from headers
     let user_id = extract_user_id(&r)?;
 
+    // Start a database transaction
     let mut wtxn = db_env.write_txn()?;
 
-    db.put(&mut wtxn, &format!("{user_id}.name"), &name)?;
+    let user_key = format!("user.{user_id}");
+    let (date, _) = get_current_date(&user_key, db, &mut wtxn)?;
+    let timestamp = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)?
+        .as_millis();
+
+    let record = JournalEntryDbRecord {
+        text: &payload.text,
+        timestamp,
+        qty: payload.qty,
+        qty_units: &payload.qty_units,
+        calories: payload.calories,
+        carbohydrate: payload.carbohydrate,
+        fat: payload.fat,
+        protein: payload.protein,
+    };
+
+    let record = serde_json::to_string(&record)?;
+
+    let entry_key = format!("entry.{user_id}.{date}.{timestamp}");
+    let recall_key = format!("food.{}", &payload.text[..16]);
+
+    // Insert the record twice with two different keys, one for recall and one for the journal.
+    db.put(&mut wtxn, &entry_key, &record)?;
+    db.put(&mut wtxn, &recall_key, &record)?;
     wtxn.commit()?;
 
     Ok(Response::builder(Status::NO_CONTENT).build())
