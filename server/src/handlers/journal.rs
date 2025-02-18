@@ -3,10 +3,9 @@ use crate::handlers::end_day::get_current_date;
 use crate::state::extract_user_id;
 use heed::types::Str;
 use heed::{Database, Env};
-use oxhttp::model::{HeaderName, Headers, Request, Response, Status};
+use oxhttp::model::{Request, Response, Status};
 use serde::{Deserialize, Serialize};
 use std::io::Read;
-use std::str::FromStr;
 use std::time::SystemTime;
 
 #[derive(Deserialize)]
@@ -22,8 +21,37 @@ struct JournalEntry {
     protein: u64,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 struct JournalEntryDbRecord<'a> {
+    text: &'a str,
+    timestamp: u128,
+    qty: f64,
+    qty_units: &'a str,
+    calories: u64,
+    carbohydrate: u64,
+    fat: u64,
+    protein: u64,
+}
+
+impl<'a> JournalEntryDbRecord<'a> {
+    fn as_response_with_id(&self, id: &'a str) -> JournalEntryResponse<'a> {
+        JournalEntryResponse {
+            id,
+            text: self.text,
+            timestamp: self.timestamp,
+            qty: self.qty,
+            qty_units: self.qty_units,
+            calories: self.calories,
+            carbohydrate: self.carbohydrate,
+            fat: self.fat,
+            protein: self.protein,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct JournalEntryResponse<'a> {
+    id: &'a str,
     text: &'a str,
     timestamp: u128,
     qty: f64,
@@ -39,6 +67,11 @@ struct JournalEntryRequest {
     date: String,
 }
 
+#[derive(Serialize)]
+struct JournalApiResponse<'a> {
+    records: Vec<JournalEntryResponse<'a>>,
+}
+
 pub fn journal(r: &mut Request, db_env: &Env, db: &Database<Str, Str>) -> Response {
     let res = match &**r.method() {
         "GET" => get_journal(r, db_env, db),
@@ -51,10 +84,20 @@ pub fn journal(r: &mut Request, db_env: &Env, db: &Database<Str, Str>) -> Respon
 
 fn get_journal(r: &mut Request, db_env: &Env, db: &Database<Str, Str>) -> anyhow::Result<Response> {
     let user_id = extract_user_id(&r)?;
+    let prefix_len = "entry..".len() + user_id.len();
 
-    let rtxn = db_env.read_txn().unwrap();
-    let res = db.get(&rtxn, &format!("{user_id}.name"))?.unwrap();
-    let res = res.to_owned();
+    let mut records = Vec::new();
+    let rtxn = db_env.read_txn()?;
+
+    for record in db.prefix_iter(&rtxn, &format!("entry.{user_id}."))? {
+        let (key, value) = record?;
+        let record = serde_json::from_str::<JournalEntryDbRecord>(value)?;
+        records.push(record.as_response_with_id(&key[prefix_len..]));
+    }
+
+    let res = serde_json::to_vec(&JournalApiResponse { records })?;
+
+    rtxn.commit()?;
 
     Ok(Response::builder(Status::OK).with_body(res))
 }

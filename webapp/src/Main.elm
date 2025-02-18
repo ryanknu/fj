@@ -4,10 +4,10 @@ import Browser
 import Date
 import File exposing (File)
 import File.Select as Select
-import Html exposing (Html, button, div, h1, h2, img, input, main_, nav, node, option, rt, select, text)
+import Html exposing (Html, b, button, div, h1, h2, img, input, main_, nav, node, option, rt, select, text)
 import Html.Attributes as Attributes exposing (class, disabled, placeholder, selected, src, type_, value)
 import Html.Events exposing (onClick, onInput)
-import Http exposing (Body, emptyBody, header)
+import Http exposing (emptyBody, header)
 import Json.Decode as JsonDecode exposing (Decoder, field)
 import Json.Encode as JsonEncode
 import List exposing (isEmpty, map)
@@ -56,6 +56,17 @@ type alias AllInputs =
     }
 
 
+type alias NewJournalEntryModel =
+    { name : String
+    , quantity : Float
+    , quantityUnits : String
+    , calories : Int
+    , carbohydrates : Int
+    , fat : Int
+    , protein : Int
+    }
+
+
 type JobTypes
     = LoadingRegisteredUsers
     | RegisteringUser
@@ -85,6 +96,19 @@ type alias User =
     , targetFat : Int
     , targetProtein : Int
     , targetCarbohydrate : Int
+    }
+
+
+type alias JournalEntry =
+    { id : String
+    , text : String
+    , timestamp : String
+    , quantity : Float
+    , quantityUnits : String
+    , calories : Int
+    , carbohydrate : Int
+    , fat : Int
+    , protein : Int
     }
 
 
@@ -244,7 +268,7 @@ type Msg
       -- Journals
     | EndDayRequest
     | EndDayResponse (Result Http.Error String)
-    | LoadJournal (Result Http.Error String)
+    | LoadJournal User (Result Http.Error (List JournalEntry))
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -259,8 +283,7 @@ update msg model =
                     ( { model | commState = Error (errorToString n) }, Cmd.none )
 
         SelectUser user ->
-            -- TODO: CommState needs to be WorkingOn LoadingJournal, and we don't transition until the journal is loaded.
-            ( { model | user = Just user }, fjApiLoadJournal user )
+            ( { model | commState = WorkingOn LoadingJournal }, fjApiLoadJournal user )
 
         RgImageRequested ->
             ( model, Select.file [ "image/png", "image/jpeg" ] RgImageSelected )
@@ -326,7 +349,7 @@ update msg model =
         EndDayRequest ->
             case model.user of
                 Nothing ->
-                    ( { model | error = Just "Not logged in" }, Cmd.none )
+                    ( { model | error = Just "Could not end day. User not chosen." }, Cmd.none )
 
                 -- TODO: Set a working indicator, in case back end is slow.
                 Just user ->
@@ -338,13 +361,18 @@ update msg model =
                     ( { model | commState = Idle, user = Just <| setCurrentDate user date }, Cmd.none )
 
                 ( Err n, _ ) ->
-                    ( { model | commState = Error (errorToString n) }, Cmd.none )
+                    ( { model | commState = Error <| "Coult not end day. " ++ errorToString n }, Cmd.none )
 
                 _ ->
-                    ( { model | commState = Error "Something went wrong" }, Cmd.none )
+                    ( { model | commState = Error "Could not end day. An unexpected error occurred." }, Cmd.none )
 
-        LoadJournal result ->
-            ( model, Cmd.none )
+        LoadJournal user result ->
+            case result of
+                Ok r ->
+                    ( { model | user = Just user }, Cmd.none )
+
+                Err n ->
+                    ( { model | commState = Error <| "Could not load journal. " ++ errorToString n }, Cmd.none )
 
 
 
@@ -910,7 +938,7 @@ fjApiLoadJournal : User -> Cmd Msg
 fjApiLoadJournal user =
     fjHttpGet
         { path = "/journal"
-        , expect = Http.expectJson LoadJournal JsonDecode.string
+        , expect = Http.expectJson (LoadJournal user) journalDecoder
         , user = Just user
         }
 
@@ -933,19 +961,43 @@ registeredUsersDecoder =
     field "users" (JsonDecode.list userDecoder)
 
 
+journalDecoder : Decoder (List JournalEntry)
+journalDecoder =
+    field "records" (JsonDecode.list journalEntryDecoder)
+
+
 fjApiDecoderCurrentDate : Decoder String
 fjApiDecoderCurrentDate =
     field "current_date" JsonDecode.string
 
 
+decodeApply : Decoder a -> Decoder (a -> b) -> Decoder b
+decodeApply =
+    JsonDecode.map2 (|>)
+
+
 userDecoder : Decoder User
 userDecoder =
-    JsonDecode.map8 User
-        (field "image" JsonDecode.string)
-        (field "user_name" JsonDecode.string)
-        (field "display_name" JsonDecode.string)
-        (field "current_date" JsonDecode.string)
-        (field "target_calories" JsonDecode.int)
-        (field "target_fat" JsonDecode.int)
-        (field "target_protein" JsonDecode.int)
-        (field "target_carbohydrate" JsonDecode.int)
+    JsonDecode.succeed User
+        |> decodeApply (field "image" JsonDecode.string)
+        |> decodeApply (field "user_name" JsonDecode.string)
+        |> decodeApply (field "display_name" JsonDecode.string)
+        |> decodeApply (field "current_date" JsonDecode.string)
+        |> decodeApply (field "target_calories" JsonDecode.int)
+        |> decodeApply (field "target_fat" JsonDecode.int)
+        |> decodeApply (field "target_protein" JsonDecode.int)
+        |> decodeApply (field "target_carbohydrate" JsonDecode.int)
+
+
+journalEntryDecoder : Decoder JournalEntry
+journalEntryDecoder =
+    JsonDecode.succeed JournalEntry
+        |> decodeApply (field "id" JsonDecode.string)
+        |> decodeApply (field "text" JsonDecode.string)
+        |> decodeApply (field "timestamp" JsonDecode.string)
+        |> decodeApply (field "qty" JsonDecode.float)
+        |> decodeApply (field "qty_units" JsonDecode.string)
+        |> decodeApply (field "calories" JsonDecode.int)
+        |> decodeApply (field "carbohydrate" JsonDecode.int)
+        |> decodeApply (field "fat" JsonDecode.int)
+        |> decodeApply (field "protein" JsonDecode.int)

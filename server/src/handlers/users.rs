@@ -5,7 +5,6 @@ use jiff::Timestamp;
 use oxhttp::model::{HeaderName, Request, Response, Status};
 use serde::{Deserialize, Serialize};
 use std::io::Read;
-use std::str::FromStr;
 
 #[derive(Clone, Deserialize)]
 pub struct UserRequest {
@@ -35,7 +34,7 @@ pub struct UserDbRecord<'a> {
 }
 
 impl<'a> UserDbRecord<'a> {
-    fn into_response_with_username(self, user_name: &'a str) -> UserResponse {
+    fn into_response_with_username(self, user_name: &'a str) -> UserResponse<'a> {
         UserResponse {
             image: self.image,
             user_name,

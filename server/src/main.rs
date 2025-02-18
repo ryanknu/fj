@@ -1,4 +1,4 @@
-use heed::types::{Str, U32};
+use heed::types::Str;
 use heed::{Database, EnvOpenOptions};
 use oxhttp::model::{Response, Status};
 use oxhttp::Server;
@@ -56,7 +56,7 @@ fn main() {
         "/v1/users" => handlers::users::http_get_users(&env, &db),
         "/v1/register" => handlers::users::http_post_register(request, &env, &db),
         "/v1/end-day" => handlers::end_day::http_end_day(request, &env, &db),
-        "/journal" => handlers::journal::journal(request, &env, &db),
+        "/v1/journal" => handlers::journal::journal(request, &env, &db),
         _ => Response::builder(Status::NOT_FOUND).build(),
     });
 
